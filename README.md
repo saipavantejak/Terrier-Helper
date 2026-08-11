@@ -8,11 +8,11 @@ An AI-powered student assistant for **St. Francis College**, built with React, E
 
 ## Features
 
-- 📄 **Multi-document ingestion** — upload multiple PDFs at once (handbooks, syllabi, etc.)
-- 💬 **Streaming chat** — responses stream token-by-token for a snappy feel
-- 🔒 **API key stays server-side** — the Gemini key is never sent to the browser
-- 🗂️ **Session-based document store** — PDFs are uploaded once, not re-sent on every message
-- ✨ **Markdown rendering** — bullet points, numbered lists, and bold text from AI responses
+-  **Multi-document ingestion** — upload multiple PDFs at once (handbooks, syllabi, etc.)
+-  **Streaming chat** — responses stream token-by-token for a snappy feel
+-  **API key stays server-side** — the Gemini key is never sent to the browser
+-  **Session-based document store** — PDFs are uploaded once, not re-sent on every message
+-  **Markdown rendering** — bullet points, numbered lists, and bold text from AI responses
 
 ## Tech Stack
 
@@ -33,7 +33,7 @@ An AI-powered student assistant for **St. Francis College**, built with React, E
 ### Installation
 
 ```bash
-git clone https://github.com/your-username/terrierhelper.git
+git clone https://github.com/saipavantejak/terrierhelper.git
 cd terrierhelper
 npm install
 ```
