@@ -1,246 +1,339 @@
-
-import React, { useState, useCallback } from 'react';
-import { v4 as uuidv4 } from 'uuid';
-import ChatBubble from './components/ChatBubble';
-import ChatWindow from './components/ChatWindow';
-import { Message, DocumentFile } from './types';
-import { COLORS } from './constants';
-import { uploadDocuments, askGeminiStream } from './services/geminiService';
-
-const App: React.FC = () => {
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'welcome',
-      role: 'bot',
-      content: "Hello! I am TerrierHelper. You can upload multiple SFC documents (like 'The Cord', syllabi, or campus maps), and I'll help you with any questions about them.",
-      timestamp: new Date()
-    }
-  ]);
-  const [documents, setDocuments] = useState<DocumentFile[]>([]);
-  // Fix #4: sessionId points to server-side doc store — base64 sent once on
-  // upload, not re-transmitted with every chat message.
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [uploadState, setUploadState] = useState<'idle' | 'ingesting' | 'ready'>('idle');
-
-  const handleFileUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    setUploadState('ingesting');
-
-    const newDocs: DocumentFile[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const base64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve((e.target?.result as string).split(',')[1]);
-        reader.readAsDataURL(file);
+import { useEffect, useRef, useState } from "react";
+import ChatWindow from "./ChatWindow";
+import { api, ask, uploadDocument } from "./geminiService";
+import type { KnowledgeDocument, Message } from "./types";
+export default function App() {
+  const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [generationEnabled, setGenerationEnabled] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState("");
+  const abort = useRef<AbortController | null>(null);
+  const sending = useRef(false);
+  const uploadingRef = useRef(false);
+  const readyDocs = documents.filter((d) => d.status === "ready");
+  const indexing = documents.some(
+    (d) => d.status === "queued" || d.status === "processing",
+  );
+  useEffect(() => {
+    const controller = new AbortController();
+    api<{ documents: KnowledgeDocument[]; generationEnabled: boolean }>(
+      "/api/workspace",
+      { signal: controller.signal },
+    )
+      .then((data) => {
+        setDocuments(data.documents);
+        setGenerationEnabled(data.generationEnabled);
+        setLoaded(true);
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(e.message);
       });
-      newDocs.push({ name: file.name, base64, mimeType: file.type || 'application/pdf' });
-    }
-
-    const allDocs = [...documents, ...newDocs];
-    try {
-      const sid = await uploadDocuments(allDocs);
-      setSessionId(sid);
-      setDocuments(allDocs);
-      setUploadState('ready');
-
-      const fileNames = newDocs.map(d => d.name).join(', ');
-      setMessages(prev => [...prev, {
-        id: uuidv4(),
-        role: 'bot',
-        content: `I've successfully ingested: **${fileNames}**. You can now ask questions about these documents.`,
-        timestamp: new Date()
-      }]);
-    } catch {
-      setUploadState(documents.length > 0 ? 'ready' : 'idle');
-      setMessages(prev => [...prev, {
-        id: uuidv4(),
-        role: 'bot',
-        content: 'Sorry, there was an error uploading the documents. Please try again.',
-        timestamp: new Date()
-      }]);
-    }
-    event.target.value = '';
-  }, [documents]);
-
-  // Fix #7: useCallback restored
-  const removeDocument = useCallback((index: number) => {
-    setDocuments(prev => {
-      const updated = prev.filter((_, i) => i !== index);
-      if (updated.length === 0) {
-        setUploadState('idle');
-        setSessionId(null);
-      } else {
-        setUploadState('ingesting');
-        uploadDocuments(updated)
-          .then(sid => { setSessionId(sid); setUploadState('ready'); })
-          .catch(() => setUploadState('ready'));
-      }
-      return updated;
-    });
-  }, []);
-
-  const handleSendMessage = useCallback(async (text: string) => {
-    const userMessage: Message = {
-      id: uuidv4(),
-      role: 'user',
-      content: text,
-      timestamp: new Date()
+    return () => {
+      controller.abort();
+      abort.current?.abort();
     };
-
-    const historyToSend = [...messages];
-    setMessages(prev => [...prev, userMessage]);
-    setIsLoading(true);
-
-    const botMessageId = uuidv4();
-    setMessages(prev => [...prev, {
-      id: botMessageId,
-      role: 'bot',
-      content: '',
-      timestamp: new Date(),
-      source: documents.length > 0 ? `${documents.length} Doc(s)` : undefined,
-    }]);
-
+  }, []);
+  useEffect(() => {
+    if (!indexing) return;
+    const controller = new AbortController();
+    const timer = setInterval(() => {
+      api<{ documents: KnowledgeDocument[] }>("/api/documents", {
+        signal: controller.signal,
+      })
+        .then((data) => setDocuments(data.documents))
+        .catch((e) => {
+          if (!controller.signal.aborted) setError(e.message);
+        });
+    }, 2000);
+    return () => {
+      clearInterval(timer);
+      controller.abort();
+    };
+  }, [indexing]);
+  async function upload(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (uploadingRef.current) return;
+    uploadingRef.current = true;
+    setUploading(true);
+    setError("");
     try {
-      // Fix #1: no API key here — lives only in server.ts
-      const stream = askGeminiStream(text, historyToSend, sessionId);
-
-      let fullContent = '';
-      for await (const chunk of stream) {
-        fullContent += chunk;
-        setMessages(prev => prev.map(msg =>
-          msg.id === botMessageId ? { ...msg, content: fullContent } : msg
-        ));
+      for (const file of files) {
+        const result = await uploadDocument(file);
+        setDocuments(result.documents);
       }
-
-      if (fullContent.toLowerCase().includes('cannot find') || fullContent.toLowerCase().includes("don't see")) {
-        setMessages(prev => prev.map(msg =>
-          msg.id === botMessageId ? { ...msg, link: 'mailto:thehub@sfc.edu' } : msg
-        ));
-      }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Connection failed.';
-      setMessages(prev => prev.map(msg =>
-        msg.id === botMessageId ? { ...msg, content: `Error: ${message}` } : msg
-      ));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed.");
     } finally {
-      setIsLoading(false);
+      uploadingRef.current = false;
+      setUploading(false);
     }
-  }, [messages, documents, sessionId]);
-
+  }
+  async function remove(id: string) {
+    setError("");
+    try {
+      const result = await api<{ documents: KnowledgeDocument[] }>(
+        `/api/documents/${id}`,
+        { method: "DELETE" },
+      );
+      setDocuments(result.documents);
+      setSelected((s) => s.filter((i) => i !== id));
+      setMessages([]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed.");
+    }
+  }
+  async function reindex(id: string) {
+    try {
+      await api(`/api/documents/${id}/reindex`, { method: "POST", body: "{}" });
+      setDocuments((d) =>
+        d.map((x) => (x.id === id ? { ...x, status: "queued" } : x)),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Retry failed.");
+    }
+  }
+  async function send(question: string) {
+    if (sending.current) return;
+    sending.current = true;
+    setBusy(true);
+    setProgress("Finding relevant passages…");
+    const previous = messages.filter((m) => m.role === "user").at(-1)?.content;
+    setMessages((m) => [
+      ...m,
+      { id: crypto.randomUUID(), role: "user", content: question },
+    ]);
+    const controller = new AbortController();
+    abort.current = controller;
+    try {
+      const answer = await ask(
+        question,
+        selected,
+        previous,
+        setProgress,
+        controller.signal,
+      );
+      setMessages((m) => [
+        ...m,
+        { id: crypto.randomUUID(), role: "bot", content: "", answer },
+      ]);
+    } catch (e) {
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: "bot",
+          content: controller.signal.aborted
+            ? "Request cancelled."
+            : e instanceof Error
+              ? e.message
+              : "Request failed.",
+          error: true,
+        },
+      ]);
+    } finally {
+      setBusy(false);
+      sending.current = false;
+      abort.current = null;
+    }
+  }
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 md:p-12 relative overflow-hidden">
-      <div className="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full opacity-10 pointer-events-none" style={{ backgroundColor: COLORS.sfcRed }}></div>
-      <div className="absolute bottom-[-10%] left-[-10%] w-[30%] h-[30%] rounded-full opacity-5 pointer-events-none" style={{ backgroundColor: COLORS.sfcNavy }}></div>
-
-      <main className="w-full max-w-5xl bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col md:flex-row relative z-10 border border-gray-100">
-        <div className="md:w-1/3 p-8 flex flex-col justify-between text-white" style={{ backgroundColor: COLORS.sfcNavy }}>
+    <div className="app-shell">
+      <header className="topbar">
+        <a className="brand" href="/" aria-label="TerrierHelper home">
+          <span className="brand-mark">
+            T<span>h</span>
+          </span>
+          <span>
+            Terrier<span className="brand-light">Helper</span>
+          </span>
+        </a>
+        <span className="header-label">THE DOCUMENT WORKSPACE</span>
+        <a
+          href="https://www.sfc.edu"
+          target="_blank"
+          rel="noreferrer"
+          className="college-link"
+        >
+          St. Francis College ↗
+        </a>
+      </header>
+      <main>
+        <div className="intro">
           <div>
-            <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-6 shadow-lg rotate-3 transition-transform hover:rotate-0">
-              <span className="text-2xl font-black" style={{ color: COLORS.sfcRed }}>SFC</span>
-            </div>
-            <h1 className="text-3xl font-bold mb-4 tracking-tight">TerrierHelper</h1>
-            <p className="text-sm opacity-80 leading-relaxed font-light">
-              The intelligent student portal for St. Francis College.
-              Powered by advanced AI to navigate handbooks and academic policies in real-time.
+            <span className="eyebrow">LESS SEARCHING. MORE UNDERSTANDING.</span>
+            <h1>Find clarity in your documents.</h1>
+            <p>
+              A focused space to explore college policies—with the evidence
+              always close by.
             </p>
           </div>
-          <div className="mt-8">
-            <div className="text-[10px] uppercase tracking-widest opacity-40 mb-3 font-black">Official Resources</div>
-            <ul className="space-y-3 text-sm">
-              <li><a href="https://www.sfc.edu" className="flex items-center gap-2 hover:translate-x-1 transition-transform opacity-70 hover:opacity-100"><i className="fa-solid fa-globe w-4"></i> sfc.edu</a></li>
-              <li><a href="#" className="flex items-center gap-2 hover:translate-x-1 transition-transform opacity-70 hover:opacity-100"><i className="fa-solid fa-user-graduate w-4"></i> MySFC Portal</a></li>
-              <li><a href="#" className="flex items-center gap-2 hover:translate-x-1 transition-transform opacity-70 hover:opacity-100"><i className="fa-solid fa-calendar-days w-4"></i> Academic Calendar</a></li>
-              <li>
-                <a href="/api/download-source" className="flex items-center gap-2 hover:translate-x-1 transition-transform opacity-70 hover:opacity-100 mt-4 text-green-300">
-                  <i className="fa-solid fa-download w-4"></i> Download Source Code
-                </a>
-              </li>
-            </ul>
-          </div>
+          <span className="workspace-badge">● Private browser workspace</span>
         </div>
-
-        <div className="md:w-2/3 p-8 bg-gray-50 flex flex-col">
-          <div className="flex-1 flex flex-col items-center justify-center text-center">
-            <div className="w-20 h-20 bg-gray-200/50 rounded-3xl flex items-center justify-center mb-6 border border-gray-200">
-              <i className="fa-solid fa-file-shield text-3xl text-gray-400"></i>
-            </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Policy Ingestion</h2>
-            <p className="text-gray-500 mb-8 max-w-md text-sm">
-              Upload PDF files to initialize TerrierHelper's knowledge base. Multiple files are supported.
-            </p>
-
-            <div className="w-full max-w-md bg-white p-6 rounded-2xl shadow-sm border border-gray-200 relative group">
-              <div className="absolute -top-3 right-6 px-3 py-1 bg-[#cf2e2e] text-white text-[10px] font-black rounded-full uppercase tracking-wider">
-                v2.0 Native Stream
+        {error ? (
+          <div className="notice error" role="alert">
+            {error}
+            <button onClick={() => setError("")} aria-label="Dismiss error">
+              ×
+            </button>
+          </div>
+        ) : null}
+        {loaded && !generationEnabled ? (
+          <div className="notice" role="status">
+            Document indexing is available. Answer generation needs a Gemini API
+            key configured by the operator.
+          </div>
+        ) : null}
+        <div className="workspace-grid">
+          <aside className="library-panel" aria-label="Document library">
+            <div className="library-heading">
+              <div>
+                <span className="eyebrow">YOUR KNOWLEDGE BASE</span>
+                <h2>
+                  Documents <span>{documents.length}</span>
+                </h2>
               </div>
-              <label className="block text-xs font-bold text-gray-400 mb-4 text-left uppercase tracking-tighter">
-                Active Knowledge Objects ({documents.length})
-              </label>
-              <div className="relative group mb-4">
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  multiple
-                  onChange={handleFileUpload}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                />
-                <div className="p-6 border-2 border-dashed rounded-xl flex flex-col items-center gap-3 transition-all border-gray-200 group-hover:border-[#cf2e2e] bg-gray-50/50 group-hover:bg-[#ffeded] group-hover:shadow-inner">
-                  {uploadState === 'ingesting' ? (
-                    <i className="fa-solid fa-circle-notch fa-spin text-2xl text-[#cf2e2e]"></i>
-                  ) : (
-                    <i className="fa-solid fa-plus text-2xl text-gray-300 group-hover:text-[#cf2e2e]"></i>
-                  )}
-                  <span className="text-xs font-bold text-gray-500 group-hover:text-[#cf2e2e]">
-                    Click to add Handbook or Syllabus
-                  </span>
+            </div>
+            <label className={`upload-box ${uploading ? "disabled" : ""}`}>
+              <span className="upload-symbol" aria-hidden="true">
+                ↥
+              </span>
+              <strong>{uploading ? "Uploading…" : "Add your documents"}</strong>
+              <span>PDF · up to 10 MB each · 300 pages</span>
+              <input
+                aria-label="Upload PDF documents"
+                type="file"
+                accept="application/pdf,.pdf"
+                multiple
+                onChange={upload}
+                disabled={!loaded || uploading || busy}
+              />
+            </label>
+            <div className="scope-label">
+              <span>
+                {selected.length
+                  ? `${selected.length} selected for questions`
+                  : "Searching all ready documents"}
+              </span>
+              {selected.length ? (
+                <button disabled={busy} onClick={() => setSelected([])}>
+                  Reset
+                </button>
+              ) : null}
+            </div>
+            <div className="document-list">
+              {documents.length === 0 ? (
+                <div className="empty-library">
+                  <span aria-hidden="true">▤</span>
+                  <p>Your library starts here.</p>
+                  <small>
+                    Add a handbook, syllabus, or policy to ask your first
+                    question.
+                  </small>
                 </div>
-              </div>
-              <div className="space-y-2 max-h-[180px] overflow-y-auto pr-2">
-                {documents.map((doc, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-2.5 bg-gray-50 rounded-lg border border-gray-100 hover:border-[#cf2e2e]/30 transition-colors">
-                    <div className="flex items-center gap-3 overflow-hidden">
-                      <div className="w-8 h-8 rounded bg-red-100 flex items-center justify-center text-[#cf2e2e] text-xs font-bold">PDF</div>
-                      <span className="text-xs truncate text-gray-700 font-semibold">{doc.name}</span>
+              ) : (
+                documents.map((doc) => (
+                  <article key={doc.id} className="document-card">
+                    <div className="document-top">
+                      <input
+                        type="checkbox"
+                        aria-label={`Use ${doc.name} for questions`}
+                        checked={selected.includes(doc.id)}
+                        disabled={doc.status !== "ready" || busy}
+                        onChange={(e) =>
+                          setSelected((s) =>
+                            e.target.checked
+                              ? [...s, doc.id]
+                              : s.filter((id) => id !== doc.id),
+                          )
+                        }
+                      />
+                      <span className="pdf-icon">PDF</span>
+                      <strong title={doc.name}>{doc.name}</strong>
+                      <button
+                        className="remove-button"
+                        disabled={busy}
+                        onClick={() => remove(doc.id)}
+                        aria-label={`Delete ${doc.name}`}
+                      >
+                        ×
+                      </button>
                     </div>
-                    <button onClick={() => removeDocument(idx)} className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all">
-                      <i className="fa-solid fa-xmark text-xs"></i>
-                    </button>
-                  </div>
-                ))}
-                {documents.length === 0 && (
-                  <div className="py-6 border border-dashed rounded-lg border-gray-100 text-center">
-                    <p className="text-[11px] text-gray-400 font-medium italic">Ready for document upload</p>
-                  </div>
-                )}
-              </div>
+                    <div className={`document-status ${doc.status}`}>
+                      {doc.status === "ready"
+                        ? `${doc.pages} pages · ${doc.chunks} passages · ${doc.semantic ? "hybrid" : "keyword"}`
+                        : doc.status === "failed"
+                          ? "Indexing failed"
+                          : "Indexing…"}
+                    </div>
+                    <small className="document-version">
+                      Version {doc.version} ·{" "}
+                      {new Date(doc.createdAt).toLocaleDateString()}
+                    </small>
+                    {doc.error || doc.warning ? (
+                      <p className="document-warning">
+                        {doc.error || doc.warning}
+                      </p>
+                    ) : null}
+                    {doc.status === "failed" ||
+                    (doc.status === "ready" &&
+                      !doc.semantic &&
+                      generationEnabled) ? (
+                      <button
+                        className="text-button"
+                        disabled={busy}
+                        onClick={() => reindex(doc.id)}
+                      >
+                        Retry indexing
+                      </button>
+                    ) : null}
+                  </article>
+                ))
+              )}
             </div>
-          </div>
-
-          <div className="mt-8 pt-8 border-t flex items-center justify-between text-[10px] text-gray-400 font-bold uppercase tracking-widest">
-            <span>St. Francis College TerrierHelper</span>
-            <span className="flex items-center gap-2">
-              <i className="fa-solid fa-lock text-green-500/50"></i>
-              Private Session
-            </span>
-          </div>
+            <div className="library-footnote">
+              <strong>Your sources stay in your control.</strong>
+              <p>
+                Stored for up to 30 days in this browser’s workspace. Delete a
+                document to remove its file and search index. Clearing browser
+                cookies loses access.
+              </p>
+              <p>
+                Document text is sent to Google for semantic indexing and
+                answers when AI is configured.
+              </p>
+            </div>
+          </aside>
+          <ChatWindow
+            messages={messages}
+            busy={busy}
+            ready={
+              readyDocs.length > 0 &&
+              generationEnabled &&
+              (!selected.length ||
+                selected.every((id) => readyDocs.some((d) => d.id === id)))
+            }
+            progress={progress}
+            onSend={send}
+            onCancel={() => abort.current?.abort()}
+          />
         </div>
+        <footer>
+          <span>TerrierHelper · Independent student project</span>
+          <button
+            onClick={() => setMessages([])}
+            disabled={busy || messages.length === 0}
+          >
+            Clear conversation
+          </button>
+          <span>Grounded in your sources.</span>
+        </footer>
       </main>
-
-      <ChatWindow
-        isOpen={isChatOpen}
-        messages={messages}
-        onSendMessage={handleSendMessage}
-        isLoading={isLoading}
-        handbookStatus={uploadState === 'ready' ? 'ready' : 'idle'}
-      />
-      <ChatBubble onClick={() => setIsChatOpen(!isChatOpen)} isOpen={isChatOpen} />
     </div>
   );
-};
-
-export default App;
+}

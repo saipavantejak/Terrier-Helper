@@ -1,28 +1,47 @@
 {
   "name": "terrierhelper---sfc-student-assistant",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev": "node --import tsx server.ts",
+    "start": "NODE_ENV=production node --import tsx server.ts",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "eval": "node --import tsx eval/run.ts",
+    "check": "npm run typecheck && npm test && npm run eval && npm run build",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@google/genai": "^1.38.0",
-    "archiver": "^7.0.1",
+    "dotenv": "^18.0.4",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "uuid": "^13.0.0"
+    "tsx": "^4.23.15",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/archiver": "^7.0.0",
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/supertest": "^7.2.1",
     "@vitejs/plugin-react": "^5.0.0",
-    "tsx": "^4.21.0",
+    "pdf-lib": "^1.17.1",
+    "prettier": "^3.9.9",
+    "supertest": "^7.3.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   }
 }

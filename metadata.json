@@ -1,5 +1,5 @@
 {
   "name": "TerrierHelper - SFC Student Assistant",
-  "description": "An AI-powered assistant for St. Francis College students, trained on 'The Cord' Student Handbook using Gemini. Features PDF ingestion and context-aware chat with SFC branding.",
+  "description": "An independent college-document assistant with persistent PDF indexing, hybrid retrieval, and page-level evidence citations.",
   "requestFramePermissions": []
 }

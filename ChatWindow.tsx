@@ -1,216 +1,203 @@
-
-import React, { useState, useRef, useEffect } from 'react';
-import { Message } from '../types';
-import { COLORS } from '../constants';
-
-interface ChatWindowProps {
-  isOpen: boolean;
-  messages: Message[];
-  onSendMessage: (text: string) => void;
-  isLoading: boolean;
-  handbookStatus: 'idle' | 'ingesting' | 'ready';
-}
-
-// Fix #3: Strict HTML sanitizer — only <strong> tags are allowed through.
-// This prevents any injected HTML from executing while still rendering bold text.
-const sanitizeHtml = (html: string): string => {
-  return html.replace(/<(?!\/?strong\b)[^>]*>/gi, '');
-};
-
-// Converts **bold** markdown to <strong> and sanitizes the result.
-const formatBold = (str: string): string => {
-  const withBold = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  return sanitizeHtml(withBold);
-};
-
-// Fix #6: Renders bullet lists, numbered lists, and bold text from AI markdown.
-const FormattedText: React.FC<{ text: string }> = ({ text }) => {
-  const lines = text.split('\n');
-
-  return (
-    <div className="space-y-1">
-      {lines.map((line, i) => {
-        // Bullet points: "* item" or "- item"
-        if (/^\s*[*-] /.test(line)) {
-          const content = line.replace(/^\s*[*-] /, '');
-          return (
-            <div key={i} className="flex gap-2 ml-1">
-              <span className="text-[#cf2e2e] flex-shrink-0">•</span>
-              <span dangerouslySetInnerHTML={{ __html: formatBold(content) }} />
-            </div>
-          );
-        }
-
-        // Fix #6: Numbered lists: "1. item", "2. item", etc.
-        const numberedMatch = line.match(/^\s*(\d+)\.\s+(.*)/);
-        if (numberedMatch) {
-          const [, num, content] = numberedMatch;
-          return (
-            <div key={i} className="flex gap-2 ml-1">
-              <span className="text-[#cf2e2e] flex-shrink-0 font-semibold">{num}.</span>
-              <span dangerouslySetInnerHTML={{ __html: formatBold(content) }} />
-            </div>
-          );
-        }
-
-        // Regular paragraph / heading line
-        return (
-          <p key={i} className="min-h-[1em]" dangerouslySetInnerHTML={{ __html: formatBold(line) }} />
-        );
-      })}
-    </div>
-  );
-};
-
-const ChatWindow: React.FC<ChatWindowProps> = ({
-  isOpen,
+import { useEffect, useRef, useState } from "react";
+import type { Message } from "./types";
+export default function ChatWindow({
   messages,
-  onSendMessage,
-  isLoading,
-  handbookStatus
-}) => {
-  const [input, setInput] = useState('');
-  const scrollRef = useRef<HTMLDivElement>(null);
-
+  busy,
+  ready,
+  progress,
+  onSend,
+  onCancel,
+}: {
+  messages: Message[];
+  busy: boolean;
+  ready: boolean;
+  progress: string;
+  onSend: (question: string) => void;
+  onCancel: () => void;
+}) {
+  const [input, setInput] = useState("");
+  const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [messages, progress]);
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (input.trim() && !busy && ready) {
+      onSend(input.trim());
+      setInput("");
     }
-  }, [messages, isLoading]);
-
-  const handleSend = () => {
-    if (!input.trim() || isLoading) return;
-    onSendMessage(input.trim());
-    setInput('');
-  };
-
-  if (!isOpen) return null;
-
-  // Fix #5: Only show typing dots while waiting for the first token.
-  // Once streaming begins (content !== ''), the dots disappear and the
-  // live text takes over — no overlap.
-  const lastMessage = messages[messages.length - 1];
-  const showTypingDots =
-    isLoading && (lastMessage?.role !== 'bot' || lastMessage?.content === '');
-
+  }
   return (
-    <div className="fixed bottom-24 right-6 w-full max-w-[420px] h-[650px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden z-40 border border-gray-100 animate-in fade-in slide-in-from-bottom-4 duration-300">
-      {/* Header */}
-      <div
-        style={{ backgroundColor: COLORS.sfcNavy }}
-        className="p-4 flex items-center gap-3 text-white shadow-md relative z-10"
-      >
-        <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center overflow-hidden border-2 border-white/20">
-          {/* Terrier mascot icon — no external image dependency */}
-          <svg viewBox="0 0 64 64" className="w-8 h-8" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="32" cy="32" r="32" fill="#003366"/>
-            {/* Ears */}
-            <ellipse cx="20" cy="22" rx="7" ry="9" fill="#5a3e2b" transform="rotate(-15 20 22)"/>
-            <ellipse cx="44" cy="22" rx="7" ry="9" fill="#5a3e2b" transform="rotate(15 44 22)"/>
-            <ellipse cx="20" cy="23" rx="4" ry="6" fill="#8b6347" transform="rotate(-15 20 23)"/>
-            <ellipse cx="44" cy="23" rx="4" ry="6" fill="#8b6347" transform="rotate(15 44 23)"/>
-            {/* Head */}
-            <ellipse cx="32" cy="35" rx="16" ry="14" fill="#8b6347"/>
-            {/* Muzzle */}
-            <ellipse cx="32" cy="42" rx="9" ry="6" fill="#c49a6c"/>
-            {/* Eyes */}
-            <circle cx="25" cy="32" r="3" fill="#1a1a1a"/>
-            <circle cx="39" cy="32" r="3" fill="#1a1a1a"/>
-            <circle cx="26" cy="31" r="1" fill="white"/>
-            <circle cx="40" cy="31" r="1" fill="white"/>
-            {/* Nose */}
-            <ellipse cx="32" cy="39" rx="3.5" ry="2.5" fill="#1a1a1a"/>
-            {/* Mouth */}
-            <path d="M29 42 Q32 45 35 42" stroke="#1a1a1a" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
-          </svg>
-        </div>
+    <section className="chat-panel" aria-label="Ask your documents">
+      <div className="chat-heading">
         <div>
-          <h3 className="font-bold text-lg leading-tight">TerrierHelper</h3>
-          <p className="text-[10px] opacity-70 flex items-center gap-1">
-            <span className={`w-1.5 h-1.5 rounded-full ${handbookStatus === 'ready' ? 'bg-green-400' : 'bg-yellow-400'}`}></span>
-            {handbookStatus === 'ready' ? 'System ready' : 'Awaiting documents...'}
-          </p>
+          <span className="eyebrow">YOUR RESEARCH COMPANION</span>
+          <h2>Ask. Verify. Understand.</h2>
         </div>
+        <span className="grounded-badge">● Evidence first</span>
       </div>
-
-      {/* Messages */}
       <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50"
+        className="conversation"
+        aria-live="polite"
+        aria-relevant="additions text"
       >
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[88%] p-3.5 rounded-2xl text-[13.5px] leading-relaxed shadow-sm ${
-                msg.role === 'user'
-                  ? 'bg-blue-600 text-white rounded-tr-none'
-                  : 'bg-white text-gray-800 border border-gray-100 rounded-tl-none'
-              }`}
+        {messages.length === 0 ? (
+          <div className="empty-chat">
+            <div className="chat-emblem">
+              T<span>h</span>
+            </div>
+            <h3>Your documents, made clear.</h3>
+            <p>
+              Explore policies, find requirements, and check every answer
+              against the original source.
+            </p>
+            <div className="suggestions">
+              {[
+                "What requirements are listed?",
+                "What deadlines should I know about?",
+                "What exceptions does this policy include?",
+              ].map((q) => (
+                <button key={q} disabled={!ready} onClick={() => onSend(q)}>
+                  {q}
+                  <span aria-hidden="true">↗</span>
+                </button>
+              ))}
+            </div>
+            <small>
+              Upload a text-based PDF to get started. TerrierHelper is an
+              independent project.
+            </small>
+          </div>
+        ) : (
+          messages.map((message) => (
+            <article
+              key={message.id}
+              className={`message ${message.role}${message.error ? " error" : ""}`}
             >
-              <FormattedText text={msg.content} />
-
-              {msg.link && (
-                <div className="mt-3 pt-2 border-t border-gray-100">
-                  <a
-                    href={msg.link}
-                    className="text-blue-500 hover:text-blue-700 underline font-semibold flex items-center gap-1"
-                  >
-                    <i className="fa-solid fa-envelope text-xs"></i>
-                    Email Support Hub
-                  </a>
-                </div>
-              )}
-              {msg.source && (
-                <div className="mt-3 text-[10px] uppercase tracking-wider opacity-40 font-black border-t pt-1 border-gray-100 flex items-center gap-1">
-                  <i className="fa-solid fa-book-open"></i>
-                  Ref: {msg.source}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-
-        {/* Fix #5: dots only show before first streaming token arrives */}
-        {showTypingDots && (
-          <div className="flex justify-start">
-            <div className="bg-white p-4 rounded-2xl rounded-tl-none shadow-sm border border-gray-100">
-              <div className="flex gap-1.5 items-center">
-                <div className="w-1.5 h-1.5 bg-[#cf2e2e] rounded-full animate-bounce"></div>
-                <div className="w-1.5 h-1.5 bg-[#cf2e2e] rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                <div className="w-1.5 h-1.5 bg-[#cf2e2e] rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-              </div>
-            </div>
-          </div>
+              <span className="message-author">
+                {message.role === "user" ? "YOU" : "TERRIERHELPER"}
+              </span>
+              {message.content ? <p>{message.content}</p> : null}
+              {message.answer ? (
+                <>
+                  {message.answer.status === "insufficient_evidence" ? (
+                    <p>
+                      I couldn’t find enough supporting evidence to answer that
+                      reliably. Try a more specific question or upload the
+                      relevant document.
+                    </p>
+                  ) : (
+                    message.answer.statements.map((statement, index) => (
+                      <p key={index}>
+                        {statement.text}{" "}
+                        <span className="citation-links">
+                          {statement.citationIds.map((id) => (
+                            <a
+                              key={id}
+                              href={`#${message.id}-${id}`}
+                              aria-label={`View source ${id}`}
+                            >
+                              [{id}]
+                            </a>
+                          ))}
+                        </span>
+                      </p>
+                    ))
+                  )}
+                  {message.answer.citations.length > 0 ? (
+                    <div className="evidence">
+                      <span className="eyebrow">SUPPORTING EVIDENCE</span>
+                      {message.answer.citations.map((citation) => (
+                        <details
+                          key={citation.id}
+                          id={`${message.id}-${citation.id}`}
+                        >
+                          <summary>
+                            <span className="source-tag">{citation.id}</span>
+                            {citation.name}
+                            <span className="page-label">
+                              p. {citation.page}
+                            </span>
+                          </summary>
+                          <blockquote>{citation.quote}</blockquote>
+                          <div className="source-footer">
+                            <span>Version {citation.version}</span>
+                            <a
+                              href={`/api/documents/${citation.documentId}/file#page=${citation.page}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Open PDF page ↗
+                            </a>
+                          </div>
+                        </details>
+                      ))}
+                    </div>
+                  ) : null}
+                  <small className="answer-meta">
+                    {message.answer.retrievalMode === "hybrid"
+                      ? "Keyword + semantic retrieval"
+                      : "Keyword retrieval"}{" "}
+                    · Check sources before acting on important policies.
+                  </small>
+                </>
+              ) : null}
+            </article>
+          ))
         )}
+        {busy ? (
+          <p className="progress" role="status">
+            <span className="pulse" />
+            {progress}
+          </p>
+        ) : null}
+        <div ref={end} />
       </div>
-
-      {/* Input Area */}
-      <div className="p-4 border-t bg-white shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
-        <div className="flex gap-2 bg-gray-100 p-1 rounded-xl focus-within:ring-2 focus-within:ring-[#cf2e2e]/20 transition-all">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={handbookStatus === 'ready' ? 'Type your question...' : 'Waiting for docs...'}
-            disabled={handbookStatus !== 'ready' || isLoading}
-            className="flex-1 bg-transparent px-3 py-2 text-sm focus:outline-none disabled:opacity-50"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || handbookStatus !== 'ready' || isLoading}
-            style={{ backgroundColor: COLORS.sfcRed }}
-            className="w-10 h-10 rounded-lg text-white flex items-center justify-center transition-all hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:grayscale shadow-sm"
-          >
-            <i className="fa-solid fa-paper-plane text-sm"></i>
+      <form className="composer" onSubmit={submit}>
+        <label className="sr-only" htmlFor="question">
+          Ask a question
+        </label>
+        <textarea
+          id="question"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          maxLength={2000}
+          rows={2}
+          disabled={!ready || busy}
+          placeholder={
+            ready
+              ? "Ask a question about your documents…"
+              : "Upload and index a document to begin…"
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (input.trim() && ready && !busy) {
+                onSend(input.trim());
+                setInput("");
+              }
+            }
+          }}
+        />
+        {busy ? (
+          <button type="button" className="send-button" onClick={onCancel}>
+            Stop
           </button>
-        </div>
-      </div>
-    </div>
+        ) : (
+          <button
+            className="send-button"
+            disabled={!input.trim() || !ready}
+            type="submit"
+            aria-label="Send question"
+          >
+            ↑
+          </button>
+        )}
+      </form>
+      <p className="composer-note">
+        Answers are checked against retrieved passages. Verification can still
+        make mistakes.
+      </p>
+    </section>
   );
-};
-
-export default ChatWindow;
+}
