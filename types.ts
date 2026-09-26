@@ -1,17 +1,34 @@
-
-export type Role = 'user' | 'bot' | 'system';
-
+export interface KnowledgeDocument {
+  id: string;
+  name: string;
+  version: string;
+  createdAt: string;
+  status: "queued" | "processing" | "ready" | "failed";
+  pages: number;
+  chunks: number;
+  error: string | null;
+  warning: string | null;
+  semantic: boolean;
+}
+export interface Citation {
+  id: string;
+  documentId: string;
+  name: string;
+  version: string;
+  page: number;
+  quote: string;
+}
+export interface Answer {
+  status: "answered" | "insufficient_evidence";
+  statements: Array<{ text: string; citationIds: string[] }>;
+  citations: Citation[];
+  retrievalMode: "hybrid" | "keyword";
+  requestId: string;
+}
 export interface Message {
   id: string;
-  role: Role;
+  role: "user" | "bot";
   content: string;
-  timestamp: Date;
-  source?: string;
-  link?: string;
-}
-
-export interface DocumentFile {
-  name: string;
-  base64: string;
-  mimeType: string;
+  answer?: Answer;
+  error?: boolean;
 }
