@@ -613,6 +613,9 @@ footer button {
     padding: 18px;
   }
   .empty-library {
+    padding: 12px 8px;
+  }
+  .empty-library > span {
     display: none;
   }
   .library-footnote {
