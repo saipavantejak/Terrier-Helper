@@ -1,13 +1,16 @@
 import "dotenv/config";
 import express from "express";
 import path from "node:path";
+import { PostgresStore } from "./backend/postgres";
 import { Store } from "./backend/store";
 import { createProvider } from "./backend/provider";
 import { ingestionWorker } from "./backend/ingest";
 import { createApp } from "./backend/app";
 
-const store = new Store(process.env.DATABASE_PATH || "data/terrier.sqlite");
-store.cleanup();
+const store = process.env.DATABASE_URL
+  ? new PostgresStore(process.env.DATABASE_URL)
+  : new Store(process.env.DATABASE_PATH || "data/terrier.sqlite");
+await store.cleanup();
 const provider = createProvider();
 const worker = ingestionWorker(store, provider);
 const app = createApp(store, provider, worker.wake);
@@ -35,7 +38,11 @@ const server = app.listen(port, "0.0.0.0", () => {
   );
   worker.wake();
 });
-const cleanup = setInterval(() => store.cleanup(), 3600000);
+const cleanup = setInterval(() => {
+  Promise.resolve(store.cleanup()).catch(() =>
+    console.error("Retention cleanup failed"),
+  );
+}, 3600000);
 cleanup.unref();
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, () => {

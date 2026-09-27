@@ -1,6 +1,6 @@
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { chunkPages } from "./retrieval";
-import type { Store } from "./store";
+import type { Storage } from "./storage";
 import type { Provider } from "./provider";
 export async function extractPdf(bytes: Uint8Array) {
   const task = getDocument({
@@ -38,7 +38,7 @@ export async function extractPdf(bytes: Uint8Array) {
     await task.destroy();
   }
 }
-export function ingestionWorker(store: Store, provider: Provider) {
+export function ingestionWorker(store: Storage, provider: Provider) {
   let running = false,
     stopped = false;
   async function drain() {
@@ -46,9 +46,9 @@ export function ingestionWorker(store: Store, provider: Provider) {
     running = true;
     try {
       let job;
-      while (!stopped && (job = store.nextJob())) {
+      while (!stopped && (job = await store.nextJob())) {
         const id = String(job.id);
-        store.mark(id, "processing");
+        await store.mark(id, "processing");
         try {
           const { pages, chunks } = await extractPdf(job.bytes as Uint8Array);
           let vectors: number[][] | null = null;
@@ -70,7 +70,7 @@ export function ingestionWorker(store: Store, provider: Provider) {
                 .join(" ");
             }
           }
-          store.saveChunks(
+          await store.saveChunks(
             id,
             pages.length,
             chunks,
@@ -80,7 +80,7 @@ export function ingestionWorker(store: Store, provider: Provider) {
           );
         } catch (e) {
           const message = e instanceof Error ? e.message : "Could not read PDF";
-          store.mark(
+          await store.mark(
             id,
             "failed",
             message.includes("OCR") ||
@@ -104,4 +104,54 @@ export function ingestionWorker(store: Store, provider: Provider) {
     },
     idle: () => !running,
   };
+}
+
+// One durable job per HTTP request. Expired leases are reclaimed by a later poll.
+export async function processOne(
+  store: Storage,
+  provider: Provider,
+  owner: string,
+) {
+  if (!store.claimJob || !store.finishJob) return;
+  const job = await store.claimJob(owner);
+  if (!job) return;
+  try {
+    const { pages, chunks } = await extractPdf(job.bytes);
+    if (chunks.length > 500)
+      throw new Error(
+        "Cloud document exceeds 500 chunks. Split it into smaller PDFs.",
+      );
+    let vectors: number[][] | null = null;
+    let warning: string | null = pages.some((p) => p.trim().length < 20)
+      ? "Some pages may need OCR."
+      : null;
+    if (provider.enabled) {
+      try {
+        vectors = await provider.embed(
+          chunks.map((c) => c.text),
+          "RETRIEVAL_DOCUMENT",
+          AbortSignal.timeout(210000),
+        );
+      } catch {
+        warning = [
+          warning,
+          "Semantic indexing unavailable. Keyword search is active; retry indexing later.",
+        ]
+          .filter(Boolean)
+          .join(" ");
+      }
+    }
+    await store.finishJob(job.id, job.lease, {
+      pages: pages.length,
+      chunks,
+      vectors,
+      model: vectors ? provider.embeddingModel : null,
+      warning,
+    });
+  } catch {
+    await store.finishJob(job.id, job.lease, {
+      error:
+        "Could not index this PDF. Check that it contains readable text and meets the document limits, then retry.",
+    });
+  }
 }

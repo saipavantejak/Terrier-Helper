@@ -7,6 +7,9 @@ export default function App() {
   const [selected, setSelected] = useState<string[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [generationEnabled, setGenerationEnabled] = useState(false);
+  const [maxUploadMB, setMaxUploadMB] = useState(10);
+  const [requestProcessing, setRequestProcessing] = useState(false);
+  const processing = useRef(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -21,13 +24,17 @@ export default function App() {
   );
   useEffect(() => {
     const controller = new AbortController();
-    api<{ documents: KnowledgeDocument[]; generationEnabled: boolean }>(
-      "/api/workspace",
-      { signal: controller.signal },
-    )
+    api<{
+      documents: KnowledgeDocument[];
+      generationEnabled: boolean;
+      maxUploadMB?: number;
+      requestProcessing?: boolean;
+    }>("/api/workspace", { signal: controller.signal })
       .then((data) => {
         setDocuments(data.documents);
         setGenerationEnabled(data.generationEnabled);
+        setMaxUploadMB(data.maxUploadMB ?? 10);
+        setRequestProcessing(!!data.requestProcessing);
         setLoaded(true);
       })
       .catch((e) => {
@@ -42,6 +49,16 @@ export default function App() {
     if (!indexing) return;
     const controller = new AbortController();
     const timer = setInterval(() => {
+      if (requestProcessing && !processing.current) {
+        processing.current = true;
+        api("/api/process", { method: "POST", body: "{}" })
+          .catch((e) => {
+            if (!controller.signal.aborted) setError(e.message);
+          })
+          .finally(() => {
+            processing.current = false;
+          });
+      }
       api<{ documents: KnowledgeDocument[] }>("/api/documents", {
         signal: controller.signal,
       })
@@ -54,7 +71,7 @@ export default function App() {
       clearInterval(timer);
       controller.abort();
     };
-  }, [indexing]);
+  }, [indexing, requestProcessing]);
   async function upload(event: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
@@ -64,7 +81,7 @@ export default function App() {
     setError("");
     try {
       for (const file of files) {
-        const result = await uploadDocument(file);
+        const result = await uploadDocument(file, maxUploadMB);
         setDocuments(result.documents);
       }
     } catch (e) {
@@ -204,7 +221,7 @@ export default function App() {
                 ↥
               </span>
               <strong>{uploading ? "Uploading…" : "Add your documents"}</strong>
-              <span>PDF · up to 10 MB each · 300 pages</span>
+              <span>PDF · up to {maxUploadMB} MB each · 300 pages</span>
               <input
                 aria-label="Upload PDF documents"
                 type="file"
@@ -299,7 +316,7 @@ export default function App() {
             <div className="library-footnote">
               <strong>Your sources stay in your control.</strong>
               <p>
-                Stored for up to 30 days in this browser’s workspace. Delete a
+                Stored for 30 days in this browser’s workspace. Delete a
                 document to remove its file and search index. Clearing browser
                 cookies loses access.
               </p>

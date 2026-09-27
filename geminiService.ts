@@ -13,9 +13,12 @@ export async function api<T>(
   if (!response.ok) throw new Error(data.error || "Request failed.");
   return data as T;
 }
-export async function uploadDocument(file: File) {
-  if (file.size > 10 * 1024 * 1024 || !file.name.toLowerCase().endsWith(".pdf"))
-    throw new Error("Choose a PDF up to 10 MB.");
+export async function uploadDocument(file: File, maxMB = 10) {
+  if (
+    file.size > maxMB * 1024 * 1024 ||
+    !file.name.toLowerCase().endsWith(".pdf")
+  )
+    throw new Error(`Choose a PDF up to ${maxMB} MB.`);
   const base64 = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result).split(",")[1]);

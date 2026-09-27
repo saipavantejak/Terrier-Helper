@@ -23,6 +23,7 @@ export interface Provider {
   embed(
     texts: string[],
     task: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY",
+    signal?: AbortSignal,
   ): Promise<number[][]>;
   answer(
     question: string,
@@ -73,14 +74,18 @@ export function createProvider(): Provider {
   return {
     enabled: !!ai,
     embeddingModel,
-    async embed(texts, task) {
+    async embed(texts, task, signal) {
       if (!ai) throw new Error("Generation is not configured");
       const vectors: number[][] = [];
       for (let i = 0; i < texts.length; i += 32) {
         const response = await ai.models.embedContent({
           model: embeddingModel,
           contents: texts.slice(i, i + 32),
-          config: { taskType: task, outputDimensionality: 768 },
+          config: {
+            taskType: task,
+            outputDimensionality: 768,
+            abortSignal: signal,
+          },
         });
         const batch = response.embeddings?.map((e) => e.values ?? []) ?? [];
         if (
