@@ -3,7 +3,8 @@ import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
 import crypto from "node:crypto";
 import { z } from "zod";
-import type { Store } from "./store";
+import type { Storage } from "./storage";
+import { processOne } from "./ingest";
 import { retrieve } from "./retrieval";
 import { validateCitations, type Provider } from "./provider";
 import type { Answer } from "../types";
@@ -31,11 +32,13 @@ const querySchema = z
   })
   .strict();
 export function createApp(
-  store: Store,
+  store: Storage,
   provider: Provider,
   wake: () => void = () => {},
 ) {
   const app = express();
+  const cloud = !!store.claimJob;
+  const maxBytes = (cloud ? 3 : 10) * 1024 * 1024;
   app.disable("x-powered-by");
   if (process.env.TRUST_PROXY)
     app.set("trust proxy", Number(process.env.TRUST_PROXY));
@@ -58,8 +61,8 @@ export function createApp(
           : false,
     }),
   );
-  app.get("/api/health", (_req, res) => {
-    store.db.prepare("SELECT 1").get();
+  app.get("/api/health", async (_req, res) => {
+    await store.health();
     res.json({ status: "ok" });
   });
   app.use(
@@ -71,7 +74,7 @@ export function createApp(
       legacyHeaders: false,
     }),
   );
-  app.use("/api", (req, res, next) => {
+  app.use("/api", async (req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     res.locals.requestId = crypto.randomUUID();
     res.setHeader("X-Request-Id", res.locals.requestId);
@@ -89,14 +92,29 @@ export function createApp(
       )
         return res.status(415).json({ error: "Use application/json." });
     }
+    if (
+      store.consume &&
+      !(await store.consume(
+        "ip:" +
+          crypto
+            .createHash("sha256")
+            .update(req.ip || "unknown")
+            .digest("hex"),
+        90,
+        60000,
+      ))
+    )
+      return res
+        .status(429)
+        .json({ error: "Too many requests. Please wait a minute." });
     const token = req.headers.cookie
       ?.split(";")
       .map((v) => v.trim())
       .find((v) => v.startsWith("terrier_owner="))
       ?.slice(14);
-    if (store.owner(token)) res.locals.owner = token;
+    if (await store.owner(token)) res.locals.owner = token;
     else if (req.path === "/workspace" && req.method === "GET") {
-      res.locals.owner = store.createOwner();
+      res.locals.owner = await store.createOwner();
       res.cookie("terrier_owner", res.locals.owner, {
         httpOnly: true,
         sameSite: "strict",
@@ -105,22 +123,22 @@ export function createApp(
         path: "/",
       });
     } else
-      return res
-        .status(401)
-        .json({
-          error: "Workspace expired. Reload to create a new workspace.",
-        });
+      return res.status(401).json({
+        error: "Workspace expired. Reload to create a new workspace.",
+      });
     next();
   });
-  app.use("/api", express.json({ limit: "14mb" }));
-  app.get("/api/workspace", (_req, res) =>
+  app.use("/api", express.json({ limit: cloud ? "4.2mb" : "14mb" }));
+  app.get("/api/workspace", async (_req, res) =>
     res.json({
-      documents: store.list(res.locals.owner),
+      documents: await store.list(res.locals.owner),
       generationEnabled: provider.enabled,
+      maxUploadMB: cloud ? 3 : 10,
+      requestProcessing: cloud,
     }),
   );
-  app.get("/api/documents", (_req, res) =>
-    res.json({ documents: store.list(res.locals.owner) }),
+  app.get("/api/documents", async (_req, res) =>
+    res.json({ documents: await store.list(res.locals.owner) }),
   );
   app.post(
     "/api/documents",
@@ -130,20 +148,29 @@ export function createApp(
       standardHeaders: "draft-8",
       legacyHeaders: false,
     }),
-    (req, res) => {
+    async (req, res) => {
+      if (
+        store.consume &&
+        !(await store.consume("upload:" + res.locals.owner, 8, 60000))
+      )
+        return res
+          .status(429)
+          .json({ error: "Too many uploads. Try again in a minute." });
       const data = uploadSchema.parse(req.body);
       const bytes = Buffer.from(data.base64, "base64");
       if (
-        bytes.length > 10 * 1024 * 1024 ||
+        bytes.length > maxBytes ||
         bytes.subarray(0, 5).toString() !== "%PDF-"
       )
         return res
           .status(400)
-          .json({ error: "Upload a valid PDF up to 10 MB." });
+          .json({ error: `Upload a valid PDF up to ${cloud ? 3 : 10} MB.` });
       try {
-        const id = store.add(res.locals.owner, data.name, bytes);
+        const id = await store.add(res.locals.owner, data.name, bytes);
         wake();
-        res.status(202).json({ id, documents: store.list(res.locals.owner) });
+        res
+          .status(202)
+          .json({ id, documents: await store.list(res.locals.owner) });
       } catch (e) {
         res
           .status(413)
@@ -151,20 +178,27 @@ export function createApp(
       }
     },
   );
-  app.delete("/api/documents/:id", (req, res) => {
-    if (!store.remove(res.locals.owner, req.params.id))
-      return res.status(404).json({ error: "Document not found." });
-    res.json({ documents: store.list(res.locals.owner) });
+  app.param("id", (_req, res, next, id) => {
+    if (!z.string().uuid().safeParse(id).success) {
+      res.status(400).json({ error: "Invalid document ID." });
+      return;
+    }
+    next();
   });
-  app.post("/api/documents/:id/reindex", (req, res) => {
-    if (!store.file(res.locals.owner, req.params.id))
+  app.delete("/api/documents/:id", async (req, res) => {
+    if (!(await store.remove(res.locals.owner, req.params.id)))
       return res.status(404).json({ error: "Document not found." });
-    store.mark(req.params.id, "queued");
+    res.json({ documents: await store.list(res.locals.owner) });
+  });
+  app.post("/api/documents/:id/reindex", async (req, res) => {
+    if (!(await store.file(res.locals.owner, req.params.id)))
+      return res.status(404).json({ error: "Document not found." });
+    await store.mark(req.params.id, "queued");
     wake();
     res.status(202).json({ ok: true });
   });
-  app.get("/api/documents/:id/file", (req, res) => {
-    const file = store.file(res.locals.owner, req.params.id);
+  app.get("/api/documents/:id/file", async (req, res) => {
+    const file = await store.file(res.locals.owner, req.params.id);
     if (!file) return res.status(404).json({ error: "Document not found." });
     res
       .type("application/pdf")
@@ -173,6 +207,23 @@ export function createApp(
         "inline; filename*=UTF-8''" + encodeURIComponent(String(file.name)),
       );
     res.send(Buffer.from(file.bytes as Uint8Array));
+  });
+  app.post("/api/process", async (_req, res) => {
+    if (
+      store.consume &&
+      !(await store.consume("process:" + res.locals.owner, 20, 60000))
+    )
+      return res.status(429).json({ error: "Too many processing requests." });
+    const key = "index:" + res.locals.owner;
+    const lease = store.acquire ? await store.acquire(key, 300000) : null;
+    if (store.acquire && !lease)
+      return res.json({ documents: await store.list(res.locals.owner) });
+    try {
+      await processOne(store, provider, res.locals.owner);
+    } finally {
+      if (lease && store.release) await store.release(key, lease);
+    }
+    res.json({ documents: await store.list(res.locals.owner) });
   });
   const activeOwners = new Set<string>();
   app.post(
@@ -187,37 +238,48 @@ export function createApp(
       const data = querySchema.parse(req.body),
         owner = res.locals.owner as string;
       if (activeOwners.has(owner) || activeOwners.size >= 8)
-        return res
-          .status(429)
-          .json({
-            error: "A question is already processing. Please wait and retry.",
-          });
+        return res.status(429).json({
+          error: "A question is already processing. Please wait and retry.",
+        });
       if (!provider.enabled)
-        return res
-          .status(503)
-          .json({
-            error:
-              "Answer generation is not configured. The operator must set GEMINI_API_KEY. Documents can still be uploaded and indexed.",
-          });
-      const docs = store.list(owner);
+        return res.status(503).json({
+          error:
+            "Answer generation is not configured. The operator must set GEMINI_API_KEY. Documents can still be uploaded and indexed.",
+        });
+      const docs = await store.list(owner);
       if (
         data.documentIds?.some(
           (id) => !docs.some((d) => d.id === id && d.status === "ready"),
         )
       )
+        return res.status(409).json({
+          error:
+            "A selected document is unavailable or still indexing. Refresh the document list.",
+        });
+      let chunks = store.search
+        ? []
+        : await store.chunks(owner, data.documentIds);
+      if (
+        store.search ? !docs.some((d) => d.status === "ready") : !chunks.length
+      )
+        return res.status(409).json({
+          error: "Upload a readable PDF and wait until indexing is complete.",
+        });
+      if (
+        store.consume &&
+        (!(await store.consume("chat:" + owner, 15, 60000)) ||
+          !(await store.consume("chat:global", 100, 3600000)))
+      )
         return res
-          .status(409)
-          .json({
-            error:
-              "A selected document is unavailable or still indexing. Refresh the document list.",
-          });
-      const chunks = store.chunks(owner, data.documentIds);
-      if (!chunks.length)
+          .status(429)
+          .json({ error: "Question limit reached. Please try later." });
+      const lease = store.acquire
+        ? await store.acquire("chat:" + owner, 120000)
+        : null;
+      if (store.acquire && !lease)
         return res
-          .status(409)
-          .json({
-            error: "Upload a readable PDF and wait until indexing is complete.",
-          });
+          .status(429)
+          .json({ error: "A question is already processing. Please wait." });
       activeOwners.add(owner);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 90000);
@@ -247,9 +309,19 @@ export function createApp(
             ? `${data.previousQuestion}\n${data.question}`
             : data.question;
         let vector: number[] | null = null;
-        if (chunks.some((c) => c.embeddingModel === provider.embeddingModel)) {
+        if (
+          store.search
+            ? docs.some((d) => d.semantic && d.status === "ready")
+            : chunks.some((c) => c.embeddingModel === provider.embeddingModel)
+        ) {
           try {
-            vector = (await provider.embed([query], "RETRIEVAL_QUERY"))[0];
+            vector = (
+              await provider.embed(
+                [query],
+                "RETRIEVAL_QUERY",
+                controller.signal,
+              )
+            )[0];
             mode = "hybrid";
           } catch {
             send("progress", {
@@ -257,6 +329,14 @@ export function createApp(
             });
           }
         }
+        if (store.search)
+          chunks = await store.search(
+            owner,
+            data.documentIds,
+            query,
+            vector,
+            provider.embeddingModel,
+          );
         const evidence = retrieve(
           chunks,
           query,
@@ -299,15 +379,14 @@ export function createApp(
         }
         // Re-check document ownership/existence after slow provider calls.
         const current = new Set(
-          store
-            .list(owner)
+          (await store.list(owner))
             .filter((d) => d.status === "ready")
             .map((d) => d.id),
         );
         if (evidence.some((c) => !current.has(c.documentId)))
           throw new Error("Document changed during generation");
         send("answer", result);
-        store.record({
+        await store.record({
           requestId,
           event: "answer",
           status: result.status,
@@ -324,7 +403,7 @@ export function createApp(
             : "Could not produce a verified answer. Please retry or inspect your documents.",
           requestId,
         });
-        store.record({
+        await store.record({
           requestId,
           event: "answer_error",
           latencyMs: Date.now() - started,
@@ -335,6 +414,7 @@ export function createApp(
         clearInterval(heartbeat);
         activeOwners.delete(owner);
         res.end();
+        if (lease && store.release) await store.release("chat:" + owner, lease);
       }
     },
   );
@@ -349,23 +429,19 @@ export function createApp(
       _next: express.NextFunction,
     ) => {
       if (err instanceof z.ZodError)
-        return res
-          .status(400)
-          .json({
-            error:
-              "Invalid request. Check file name, question length, and document IDs.",
-          });
-      const e = err as { status?: number; type?: string };
-      res
-        .status(e.status === 413 ? 413 : e.status === 400 ? 400 : 500)
-        .json({
+        return res.status(400).json({
           error:
-            e.status === 413
-              ? "Request is too large."
-              : e.status === 400
-                ? "Invalid JSON request."
-                : "Request failed.",
+            "Invalid request. Check file name, question length, and document IDs.",
         });
+      const e = err as { status?: number; type?: string };
+      res.status(e.status === 413 ? 413 : e.status === 400 ? 400 : 500).json({
+        error:
+          e.status === 413
+            ? "Request is too large."
+            : e.status === 400
+              ? "Invalid JSON request."
+              : "Request failed.",
+      });
     },
   );
   return app;

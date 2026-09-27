@@ -186,6 +186,9 @@ export class Store {
       .prepare("INSERT INTO events VALUES(?,?,?)")
       .run(crypto.randomUUID(), new Date().toISOString(), JSON.stringify(data));
   }
+  health() {
+    this.db.prepare("SELECT 1").get();
+  }
   close() {
     this.db.close();
   }

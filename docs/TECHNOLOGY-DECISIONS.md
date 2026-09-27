@@ -1,0 +1,33 @@
+# Technology decisions and interview answers
+
+The goal is to demonstrate transferable engineering skills and a working evidence-grounded RAG pipeline. Popularity alone is not a selection criterion. Surveys show adoption, not guaranteed hiring demand; the [Stack Overflow 2025 technology survey](https://survey.stackoverflow.co/2025/technology) is one contextual source, not proof every employer wants every package below.
+
+| Choice | Why here | Alternative and when it is better |
+| --- | --- | --- |
+| TypeScript + React | Shared API types and a stateful document/chat interface; an established web ecosystem | Next.js for server-rendered public pages, SEO, or deeper full-stack routing needs; this private workspace gains little from a rewrite |
+| Node.js + Express | Reuses the tested API, supports streaming, and shares TypeScript with the UI | Python/FastAPI when OCR, local ML models, or Python data pipelines dominate |
+| PostgreSQL + pgvector | Transactions, ownership, quotas, job leases, full-text and vector search in one durable system | Pinecone/Qdrant when vector scale, latency, or operational requirements justify a separate service and synchronization |
+| node-postgres (`pg`) | Parameterized SQL, explicit transactions and connection pooling; query behavior is reviewable | Prisma/Drizzle when schema tooling and broader CRUD become more valuable than direct SQL control |
+| Gemini through Google's SDK | Supports structured responses and embeddings; user already selected this provider; behind a replaceable `Provider` interface | OpenAI, Anthropic or hosted open models after evaluating quality, latency, privacy and cost on the same dataset |
+| PDF.js | Page-aware extraction and citation provenance without shipping a large document processing stack | OCR/document AI for scanned PDFs, complex tables and difficult reading order |
+| Hybrid retrieval + RRF | Keyword matches retain exact policy terms, semantic matches help paraphrases, fusion avoids comparing incompatible raw scores | Dense-only search for evaluated semantic corpora; cross-encoder reranking after measuring its incremental quality/cost |
+| Vercel + Vite | CDN-hosted frontend and bounded request-driven API; user requested Vercel | Containers/workers for long OCR jobs, autonomous queues or workloads exceeding function limits |
+| GitHub Actions + Playwright + Node tests | Repeatable builds, real PostgreSQL checks, browser workflows and small retrieval regressions | Additional load testing and human-labelled evaluation before claiming production scale/accuracy |
+
+## Concise answers to likely questions
+
+**Why pgvector instead of a dedicated vector database?** The corpus is bounded per workspace and metadata ownership matters. PostgreSQL handles both filtering and vectors, so deleting a document removes its chunks transactionally. We use exact similarity search now; an HNSW index or separate vector service must earn its complexity through measured latency and recall.
+
+**Why not LangChain or LlamaIndex?** The current pipeline is small and explicit: parse, chunk, embed, retrieve, generate, verify. A framework becomes useful when connectors, agent orchestration, or many retrieval strategies outweigh the extra abstraction. Framework absence does not determine whether a project is RAG.
+
+**Why not use the newest tool everywhere?** Mature components reduce integration risk. Newer capability, pgvector-based semantic retrieval, is paired with proven database and web fundamentals. The selection follows workload constraints, not a résumé checklist.
+
+**How is this RAG rather than a chatbot wrapper?** Indexed chunks are selected using lexical and semantic retrieval before generation. The answer model sees selected evidence rather than entire uploaded PDFs; statements must cite exact retrieved quotes and pass a separate support check.
+
+**Does verification prevent hallucinations?** No guarantee. Exact quotation validation proves provenance, not entailment. The verifier is also a model. Evaluate unsupported claims and false refusals with human-labelled data and expose citations for inspection.
+
+**What happens when a serverless invocation stops?** Persistent job state and expiring leases allow a later browser processing request to retry. A fresh lease token fences out stale writes. This implementation depends on an active/reopened browser; an autonomous durable queue is a next step for stronger background guarantees.
+
+**What would you improve first for a university rollout?** Institutional login and authorization, private object storage/direct uploads, autonomous ingestion, OCR, privacy/retention review, measured retrieval and answer evaluation on authorized university documents, and load/cost testing. Anonymous browser workspaces and synthetic test scores are not enterprise readiness.
+
+**How do you compare alternatives honestly?** Fix a dataset and budget, then report retrieval Recall@k/MRR, human-rated answer/citation support, refusal errors, p95 latency and cost per successful answer. The repository's synthetic local regression is only a starting baseline; do not present it as real university answer accuracy or cloud-search accuracy.
