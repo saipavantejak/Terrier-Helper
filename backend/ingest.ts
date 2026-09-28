@@ -1,7 +1,7 @@
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { chunkPages } from "./retrieval";
-import type { Storage } from "./storage";
-import type { Provider } from "./provider";
+import { chunkPages } from "./retrieval.js";
+import type { Storage } from "./storage.js";
+import type { Provider } from "./provider.js";
 export async function extractPdf(bytes: Uint8Array) {
   const task = getDocument({
     data: new Uint8Array(bytes),

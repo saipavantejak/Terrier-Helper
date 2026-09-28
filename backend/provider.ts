@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
-import type { Chunk } from "./store";
-import type { Answer, Citation } from "../types";
+import type { Chunk } from "./store.js";
+import type { Answer, Citation } from "../types.js";
 
 const claimSchema = z.object({
   text: z.string().min(1).max(1800),

@@ -1,4 +1,4 @@
-import type { Chunk } from "./store";
+import type { Chunk } from "./store.js";
 const stop = new Set(
   "a an the is are was were be been being do does did i me my we our you your it its this that these those what which who when where how can could would should will shall please tell about of for to from in on at by and or with as".split(
     " ",

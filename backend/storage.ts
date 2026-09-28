@@ -1,4 +1,4 @@
-import type { Store, Chunk } from "./store";
+import type { Store, Chunk } from "./store.js";
 type AsyncCompatible<T> = {
   [K in keyof T]: T[K] extends (...args: infer A) => infer R
     ? (...args: A) => R | Promise<Awaited<R>>

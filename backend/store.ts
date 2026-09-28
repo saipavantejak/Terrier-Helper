@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import type { KnowledgeDocument } from "../types";
+import type { KnowledgeDocument } from "../types.js";
 
 export interface Chunk {
   id: string;

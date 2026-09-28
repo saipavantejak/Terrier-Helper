@@ -1,7 +1,7 @@
 import express from "express";
-import { PostgresStore } from "../backend/postgres";
-import { createProvider } from "../backend/provider";
-import { createApp } from "../backend/app";
+import { PostgresStore } from "../backend/postgres.js";
+import { createProvider } from "../backend/provider.js";
+import { createApp } from "../backend/app.js";
 
 const app = express();
 if (!process.env.DATABASE_URL) {

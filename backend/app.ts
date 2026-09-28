@@ -3,11 +3,11 @@ import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
 import crypto from "node:crypto";
 import { z } from "zod";
-import type { Storage } from "./storage";
-import { processOne } from "./ingest";
-import { retrieve } from "./retrieval";
-import { validateCitations, type Provider } from "./provider";
-import type { Answer } from "../types";
+import type { Storage } from "./storage.js";
+import { processOne } from "./ingest.js";
+import { retrieve } from "./retrieval.js";
+import { validateCitations, type Provider } from "./provider.js";
+import type { Answer } from "../types.js";
 
 const uploadSchema = z
   .object({

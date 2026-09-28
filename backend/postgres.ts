@@ -1,9 +1,9 @@
 import pg from "pg";
 import crypto from "node:crypto";
-import { tokens } from "./retrieval";
-import type { Storage } from "./storage";
-import type { Chunk } from "./store";
-import type { KnowledgeDocument } from "../types";
+import { tokens } from "./retrieval.js";
+import type { Storage } from "./storage.js";
+import type { Chunk } from "./store.js";
+import type { KnowledgeDocument } from "../types.js";
 
 export class PostgresStore implements Storage {
   pool: pg.Pool;
