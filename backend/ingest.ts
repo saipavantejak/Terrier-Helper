@@ -148,7 +148,9 @@ export async function processOne(
       model: vectors ? provider.embeddingModel : null,
       warning,
     });
-  } catch {
+  } catch (error) {
+    // Report deployment failures without logging uploaded text, filenames or secrets.
+    console.error(JSON.stringify({event:'indexing_failed',kind:error instanceof Error ? error.name : 'unknown',workerLoadFailed:error instanceof Error && /fake worker|Cannot find module/.test(error.message)}));
     await store.finishJob(job.id, job.lease, {
       error:
         "Could not index this PDF. Check that it contains readable text and meets the document limits, then retry.",
