@@ -13,8 +13,9 @@
     "check": "npm run typecheck && npm test && npm run eval && npm run build",
     "test:browser": "playwright test",
     "db:migrate": "node --import tsx scripts/migrate.ts",
-    "vercel:build": "node --import tsx scripts/diagnose-gemini.ts && npm run db:migrate && npm run build",
-    "test:runtime": "tsc api/handler.ts --outDir .runtime-check --noEmit false --module NodeNext --moduleResolution NodeNext --target ES2022 --esModuleInterop --skipLibCheck --strict && node -e \"import('./.runtime-check/api/handler.js')\""
+    "vercel:build": "npm run db:migrate && npm run build",
+    "test:runtime": "tsc api/handler.ts --outDir .runtime-check --noEmit false --module NodeNext --moduleResolution NodeNext --target ES2022 --esModuleInterop --skipLibCheck --strict && node -e \"import('./.runtime-check/api/handler.js')\"",
+    "diagnose:gemini": "node --import tsx scripts/diagnose-gemini.ts"
   },
   "dependencies": {
     "@google/genai": "^1.38.0",

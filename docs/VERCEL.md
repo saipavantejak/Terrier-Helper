@@ -51,3 +51,10 @@ CI starts PostgreSQL 17 with pgvector, runs real database integration checks plu
 Current migrations are additive and idempotent. For future changes, use versioned migrations and backward-compatible expand/contract steps before rolling deployments. Restrict the runtime database role and separate migration privileges before an institutional production rollout. Back up and restore-test your database. No SSO, OCR, autonomous durable queue, large-corpus load test, or human-reviewed answer-quality certification is claimed.
 
 References: [Vercel function limits](https://vercel.com/docs/functions/limitations), [pgvector](https://github.com/pgvector/pgvector).
+
+
+### Gemini generation diagnostics
+
+`npm run diagnose:gemini` performs two small, synthetic generation requests using the server-side Gemini key and configured primary/fallback models. It prints model IDs, response status, and sanitized errors, never the key or uploaded documents. Run it only when diagnosing provider availability; normal deployments do not make these calls. These requests may consume provider quota.
+
+On September 29, 2026, a minimal production deployment probe isolated a 503 on `gemini-3.8-flash`: Google reported high demand. `gemini-3.5-flash` responded, and the live RAG workflow subsequently returned the known fourteen-day borrowing period with an exact quotation and page citation. This confirms recovery through the existing same-provider fallback, not a guarantee of future provider availability.
