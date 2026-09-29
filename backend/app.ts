@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { Storage } from "./storage.js";
 import { processOne } from "./ingest.js";
 import { retrieve } from "./retrieval.js";
-import { validateCitations, type Provider } from "./provider.js";
+import { safeAnswerError, validateCitations, type Provider } from "./provider.js";
 import type { Answer } from "../types.js";
 
 const uploadSchema = z
@@ -396,11 +396,11 @@ export function createApp(
           candidates: evidence.length,
         });
         send("done", {});
-      } catch {
+      } catch (error) {
         send("error", {
           error: controller.signal.aborted
             ? "The request timed out or was cancelled. Please retry."
-            : "Could not produce a verified answer. Please retry or inspect your documents.",
+            : safeAnswerError(error),
           requestId,
         });
         await store.record({

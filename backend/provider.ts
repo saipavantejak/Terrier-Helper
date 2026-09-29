@@ -1,7 +1,30 @@
-import { GoogleGenAI } from "@google/genai";
+import { ApiError, GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import type { Chunk } from "./store.js";
 import type { Answer, Citation } from "../types.js";
+
+// Never send raw provider errors: they can contain request data or credentials.
+export function safeAnswerError(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.status) {
+      case 429:
+        return "Gemini's quota or rate limit was reached. The operator should check this model's quota in Google AI Studio, then retry.";
+      case 401:
+      case 403:
+        return "Gemini denied access to answer generation. The operator should check the API key's permissions and model access.";
+      case 404:
+        return "The configured Gemini answer model is unavailable to this API key. The operator should check GEMINI_MODEL in Vercel.";
+      case 400:
+        return "Gemini rejected the answer request configuration. The operator should check the model and generation settings.";
+      case 500:
+      case 502:
+      case 503:
+      case 504:
+        return "Gemini is temporarily unavailable. Please retry shortly.";
+    }
+  }
+  return "Could not produce a verified answer. Please retry or inspect your documents.";
+}
 
 const claimSchema = z.object({
   text: z.string().min(1).max(1800),
