@@ -1,4 +1,4 @@
-import { ApiError, GoogleGenAI } from "@google/genai";
+import { ApiError, GoogleGenAI, type GenerateContentParameters } from "@google/genai";
 import { z } from "zod";
 import type { Chunk } from "./store.js";
 import type { Answer, Citation } from "../types.js";
@@ -24,6 +24,18 @@ export function safeAnswerError(error: unknown): string {
     }
   }
   return "Could not produce a verified answer. Please retry or inspect your documents.";
+}
+
+export async function withModelFallback<T>(primary: string, fallback: string, call: (model: string) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  try {
+    return await call(primary);
+  } catch (error) {
+    const status = error instanceof ApiError ? error.status : undefined;
+    console.error(JSON.stringify({event: "generation_failed", status: status ?? "unknown", model: primary}));
+    if (signal?.aborted || !fallback || fallback === primary || !status || ![500, 502, 503, 504].includes(status)) throw error;
+    // One additional request only; never route around quota or permission failures.
+    return call(fallback);
+  }
 }
 
 const claimSchema = z.object({
@@ -93,6 +105,11 @@ export function createProvider(): Provider {
     ? new GoogleGenAI({ apiKey: key, httpOptions: { timeout: 45000 } })
     : null;
   const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  const fallbackModel = process.env.GEMINI_FALLBACK_MODEL ?? "gemini-3.5-flash";
+  const generate = (request: GenerateContentParameters) => {
+    if (!ai) throw new Error("Generation is not configured");
+    return withModelFallback(model, fallbackModel, (selectedModel) => ai.models.generateContent({...request, model: selectedModel}), request.config?.abortSignal);
+  };
   const embeddingModel = process.env.EMBEDDING_MODEL || "gemini-embedding-001";
   return {
     enabled: !!ai,
@@ -124,7 +141,7 @@ export function createProvider(): Provider {
     },
     async answer(question, evidence, signal) {
       if (!ai) throw new Error("Generation is not configured");
-      const response = await ai.models.generateContent({
+      const response = await generate({
         model,
         contents: JSON.stringify({
           question,
@@ -152,7 +169,7 @@ export function createProvider(): Provider {
     },
     async verify(claims, evidence, signal) {
       if (!ai) throw new Error("Generation is not configured");
-      const response = await ai.models.generateContent({
+      const response = await generate({
         model,
         contents: JSON.stringify({
           claims,
