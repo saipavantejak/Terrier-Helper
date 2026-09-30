@@ -38,7 +38,7 @@ Configuration:
 | Variable          | Default                | Purpose                                                                   |
 | ----------------- | ---------------------- | ------------------------------------------------------------------------- |
 | `GEMINI_API_KEY`  | none                   | Gemini credential, server only; legacy `API_KEY` also accepted            |
-| `GEMINI_MODEL`    | `gemini-3.8-flash`     | Configurable answer and verification model; ensure access in your account |
+| `GEMINI_MODEL`    | `gemini-3.5-flash`     | Configurable answer and verification model; ensure access in your account |
 | `EMBEDDING_MODEL` | `gemini-embedding-001` | 768-dimensional embeddings; reindex existing documents after changes      |
 | `DATABASE_PATH`   | `data/terrier.sqlite`  | Persistent database location                                              |
 | `PORT`            | `3000`                 | HTTP port                                                                 |

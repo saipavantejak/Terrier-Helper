@@ -3,8 +3,8 @@ import { GoogleGenAI, ApiError } from '@google/genai';
 const key = process.env.GEMINI_API_KEY;
 if (key) {
   const ai = new GoogleGenAI({apiKey:key,httpOptions:{timeout:15000}});
-  const primary = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-  const fallback = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.5-flash';
+  const primary = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+  const fallback = process.env.GEMINI_FALLBACK_MODEL || primary;
   for (const model of [...new Set([primary,fallback])]) {
     try {
       const result = await ai.models.generateContent({model,contents:'Reply with exactly OK.',config:{maxOutputTokens:64}});

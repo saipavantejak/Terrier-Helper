@@ -12,7 +12,7 @@ This repository has two entry points: `server.ts` for local/Docker SQLite use, a
 | --- | --- |
 | `DATABASE_URL` | Dedicated PostgreSQL pooled connection string; integration may create this automatically |
 | `GEMINI_API_KEY` | Your Google AI Studio key; never use a `VITE_` prefix |
-| `GEMINI_MODEL` | A model available to your account; code defaults to `gemini-3.8-flash` |
+| `GEMINI_MODEL` | A model available to your account; code defaults to `gemini-3.5-flash` |
 | `EMBEDDING_MODEL` | `gemini-embedding-001` (768 dimensions) |
 | `CRON_SECRET` | A randomly generated secret of at least 32 characters |
 | `APP_ORIGIN` | Exact final production origin, e.g. `https://your-project.vercel.app` |
@@ -55,9 +55,11 @@ References: [Vercel function limits](https://vercel.com/docs/functions/limitatio
 
 ### Gemini generation diagnostics
 
-`npm run diagnose:gemini` performs two small, synthetic generation requests using the server-side Gemini key and configured primary/fallback models. It prints model IDs, response status, and sanitized errors, never the key or uploaded documents. Run it only when diagnosing provider availability; normal deployments do not make these calls. These requests may consume provider quota.
+`npm run diagnose:gemini` performs one small, synthetic generation request per distinct configured model using the server-side Gemini key and configured primary/fallback models. It prints model IDs, response status, and sanitized errors, never the key or uploaded documents. Run it only when diagnosing provider availability; normal deployments do not make these calls. These requests may consume provider quota.
 
 On September 29, 2026, a minimal production deployment probe isolated a 503 on `gemini-3.8-flash`: Google reported high demand. `gemini-3.5-flash` responded, and the live RAG workflow subsequently returned the known fourteen-day borrowing period with an exact quotation and page citation. This confirms recovery through the existing same-provider fallback, not a guarantee of future provider availability.
 
 
 On September 30 UTC, the same live question failed again after the single fallback attempt. Generation now makes at most three attempts (primary, fallback, fallback), with cancellation-aware backoff for HTTP 500/502/503/504 only. Each attempt logs its stage, model, status and latency without prompts, responses or credentials. Both answering and verification remain mandatory; provider errors never become fabricated answers. These retries mitigate transient failures but cannot guarantee availability when both models are unavailable.
+
+Production now starts with `gemini-3.5-flash`, which completed both stages in live testing. The default retry policy retries that model; operators may set `GEMINI_FALLBACK_MODEL` to an alternate model with verified account access. A live verification call returned 503 on its first 3.5 attempt and succeeded on the new retry. No billing or credential change is required for this configuration change.

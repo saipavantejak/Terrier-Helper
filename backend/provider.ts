@@ -115,8 +115,8 @@ export function createProvider(): Provider {
   const ai = key
     ? new GoogleGenAI({ apiKey: key, httpOptions: { timeout: 45000 } })
     : null;
-  const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-  const fallbackModel = process.env.GEMINI_FALLBACK_MODEL ?? "gemini-3.5-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-3.5-flash";
+  const fallbackModel = process.env.GEMINI_FALLBACK_MODEL ?? "";
   const generate = (request: GenerateContentParameters, stage: "answer" | "verify") => {
     if (!ai) throw new Error("Generation is not configured");
     return withModelFallback(model, fallbackModel, (selectedModel) => ai.models.generateContent({...request, model: selectedModel}), request.config?.abortSignal, stage);
