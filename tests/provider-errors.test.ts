@@ -30,5 +30,34 @@ test("fallback recovers server failures but never bypasses quota, permissions, c
   const controller = new AbortController(); controller.abort();
   let attempts = 0;
   await assert.rejects(withModelFallback("primary", "backup", async () => { attempts++; throw new ApiError({status:503,message:"unavailable"}); }, controller.signal));
+  assert.equal(attempts, 0);
+});
+
+
+test("a transient backup failure is retried, with a bounded attempt count", async () => {
+  const calls: string[] = [];
+  const result = await withModelFallback("primary", "backup", async model => {
+    calls.push(model);
+    if (calls.length < 3) throw new ApiError({status: 503, message: "unavailable"});
+    return "recovered";
+  });
+  assert.equal(result, "recovered");
+  assert.deepEqual(calls, ["primary", "backup", "backup"]);
+  let attempts = 0;
+  await assert.rejects(withModelFallback("primary", "backup", async () => {
+    attempts++; throw new ApiError({status: 503, message: "unavailable"});
+  }));
+  assert.equal(attempts, 3);
+});
+
+test("cancellation during retry backoff stops further provider calls", async () => {
+  const controller = new AbortController();
+  let attempts = 0;
+  const pending = withModelFallback("primary", "backup", async () => {
+    attempts++;
+    setTimeout(() => controller.abort(), 20);
+    throw new ApiError({status: 503, message: "unavailable"});
+  }, controller.signal);
+  await assert.rejects(pending);
   assert.equal(attempts, 1);
 });
