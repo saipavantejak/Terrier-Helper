@@ -7,6 +7,8 @@ type AsyncCompatible<T> = {
 export type Storage = AsyncCompatible<
   Pick<
     Store,
+    | "ensureInstitution"
+    | "setPublished"
     | "owner"
     | "createOwner"
     | "cleanup"

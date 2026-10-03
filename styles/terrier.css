@@ -1,0 +1,839 @@
+.terrier-app {
+  --th-primary: #002b5c;
+  --th-accent: #c8102e;
+  --th-ink: #172b45;
+  --th-muted: #52657b;
+  --th-border: #dce3ec;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: var(--th-ink);
+  background: #f5f7fb;
+  line-height: 1.6;
+  font-synthesis: none;
+  min-height: 100vh;
+}
+.terrier-app * {
+  box-sizing: border-box;
+}
+.terrier-app button,
+.terrier-app input,
+.terrier-app textarea {
+  font: inherit;
+}
+.terrier-app button {
+  cursor: pointer;
+  border: 0;
+}
+.terrier-app button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.terrier-app a {
+  color: var(--th-primary);
+  text-underline-offset: 3px;
+}
+.terrier-app button:focus-visible,
+.terrier-app a:focus-visible,
+.terrier-app input:focus-visible,
+.terrier-app textarea:focus-visible,
+.terrier-app summary:focus-visible {
+  outline: 3px solid #397cce;
+  outline-offset: 3px;
+}
+.terrier-app .topbar {
+  min-height: 90px;
+  padding: 18px max(5%, calc((100vw - 1320px) / 2));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  background: #fff;
+  border-top: 5px solid var(--th-accent);
+  border-bottom: 1px solid var(--th-border);
+}
+.terrier-app .brand {
+  display: flex;
+  gap: 13px;
+  align-items: center;
+  font-size: 24px;
+  font-weight: 750;
+  letter-spacing: -0.7px;
+  text-decoration: none;
+  line-height: 1.15;
+}
+.terrier-app .brand small {
+  display: block;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  font-size: 10px;
+  margin-top: 6px;
+  font-weight: 600;
+}
+.terrier-app .brand-mark {
+  background: var(--th-primary);
+  color: #fff;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 17px;
+  letter-spacing: -1px;
+}
+.terrier-app nav {
+  display: flex;
+  gap: 24px;
+  font-size: 13px;
+  align-items: center;
+}
+.terrier-app nav a {
+  text-decoration: none;
+  font-weight: 600;
+}
+.terrier-app main {
+  max-width: 1440px;
+  margin: auto;
+  padding: 32px 5% 24px;
+}
+.terrier-app .intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 25px;
+  background: var(--th-primary);
+  color: white;
+  border-radius: 18px;
+  padding: 40px 42px;
+  margin-bottom: 28px;
+  border-bottom: 5px solid var(--th-accent);
+  position: relative;
+  overflow: hidden;
+}
+.terrier-app .intro .eyebrow {
+  color: #c7d9ee;
+  font-size: 10px;
+}
+.terrier-app h1 {
+  font-size: clamp(30px, 3.2vw, 46px);
+  line-height: 1.16;
+  letter-spacing: -1.6px;
+  font-weight: 650;
+  margin: 14px 0 16px;
+  max-width: 740px;
+}
+.terrier-app .intro p {
+  font-size: 14px;
+  color: #d9e4f1;
+  margin: 0;
+  max-width: 650px;
+}
+.terrier-app .intro-stamp {
+  flex: 0 0 120px;
+  text-align: center;
+  border-left: 1px solid #ffffff30;
+  padding-left: 28px;
+}
+.terrier-app .intro-stamp span {
+  display: block;
+  font-size: 48px;
+  font-weight: 800;
+  letter-spacing: -4px;
+}
+.terrier-app .intro-stamp small {
+  font-size: 9px;
+  letter-spacing: 2px;
+  line-height: 1.6;
+}
+.terrier-app .eyebrow {
+  font-size: 10px;
+  letter-spacing: 1.7px;
+  color: var(--th-muted);
+  font-weight: 750;
+  text-transform: uppercase;
+}
+.terrier-app .workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  align-items: start;
+  gap: 24px;
+}
+.terrier-app .chat-panel,
+.terrier-app .library-panel,
+.terrier-app .admin-panel,
+.terrier-app .login-panel {
+  background: #fff;
+  border: 1px solid var(--th-border);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 5px 20px #002b5c04;
+}
+.terrier-app .chat-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 645px;
+}
+.terrier-app .chat-heading {
+  padding: 24px 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--th-border);
+}
+.terrier-app h2 {
+  font-size: 22px;
+  line-height: 1.3;
+  margin: 7px 0 0;
+  letter-spacing: -0.5px;
+}
+.terrier-app .grounded-badge {
+  color: var(--th-primary);
+  background: #edf3fb;
+  border-radius: 24px;
+  padding: 7px 10px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.terrier-app .conversation {
+  height: 425px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 26px;
+  scroll-behavior: smooth;
+}
+.terrier-app .empty-chat {
+  text-align: center;
+  max-width: 500px;
+  margin: 8px auto;
+}
+.terrier-app .chat-emblem {
+  background: var(--th-primary);
+  color: #fff;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  margin: 0 auto 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: Georgia, serif;
+  font-size: 29px;
+}
+.terrier-app .chat-emblem span {
+  font-size: 20px;
+  font-style: italic;
+  color: #fff;
+  margin-top: 12px;
+}
+.terrier-app .empty-chat h3 {
+  font-size: 24px;
+  line-height: 1.25;
+  letter-spacing: -0.7px;
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+.terrier-app .empty-chat p {
+  font-size: 13px;
+  color: var(--th-muted);
+  margin: 0 auto 18px;
+  max-width: 370px;
+}
+.terrier-app .suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 370px;
+  margin: auto auto 15px;
+}
+.terrier-app .suggestions button {
+  display: flex;
+  justify-content: space-between;
+  text-align: left;
+  background: #f6f8fc;
+  border: 1px solid var(--th-border);
+  color: var(--th-primary);
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 12px;
+}
+.terrier-app .suggestions button:hover:not(:disabled) {
+  border-color: var(--th-primary);
+  background: #edf3fb;
+}
+.terrier-app .empty-chat small {
+  font-size: 10px;
+  color: var(--th-muted);
+}
+.terrier-app .composer {
+  margin: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #b9c8db;
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.terrier-app .composer:focus-within {
+  border-color: var(--th-primary);
+  box-shadow: 0 0 0 2px #002b5c12;
+}
+.terrier-app .composer textarea {
+  border: 0;
+  background: transparent;
+  resize: none;
+  width: 100%;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--th-ink);
+}
+.terrier-app .composer textarea::placeholder {
+  color: #687b91;
+}
+.terrier-app .send-button {
+  background: var(--th-accent);
+  color: #fff;
+  border-radius: 8px;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 10px;
+  font-size: 20px;
+}
+.terrier-app .composer-note {
+  font-size: 10px;
+  color: var(--th-muted);
+  text-align: center;
+  margin: 12px 20px 20px;
+}
+.terrier-app .message {
+  border: 1px solid var(--th-border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 22px;
+  font-size: 14px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  background: #fff;
+}
+.terrier-app .message.user {
+  background: #eef3fa;
+  margin-left: 10%;
+  border-color: #e1e8f2;
+}
+.terrier-app .message-author {
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 1.3px;
+  color: var(--th-primary);
+}
+.terrier-app .message p {
+  white-space: pre-wrap;
+  margin: 8px 0;
+}
+.terrier-app .message.error {
+  border-color: #ebbbc3;
+  background: #fff7f8;
+}
+.terrier-app .citation-links a {
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--th-accent);
+}
+.terrier-app .evidence {
+  border-top: 1px solid var(--th-border);
+  margin-top: 16px;
+  padding-top: 12px;
+}
+.terrier-app .evidence details {
+  margin-top: 8px;
+  border: 1px solid var(--th-border);
+  border-radius: 8px;
+  padding: 9px 12px;
+}
+.terrier-app .evidence summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+.terrier-app .source-tag {
+  font-size: 10px;
+  background: #edf3fb;
+  color: var(--th-primary);
+  padding: 3px 5px;
+  border-radius: 4px;
+  margin-right: 6px;
+}
+.terrier-app .page-label {
+  float: right;
+  font-size: 11px;
+  color: var(--th-muted);
+}
+.terrier-app .evidence blockquote {
+  font-size: 12px;
+  margin: 12px 0;
+  border-left: 3px solid var(--th-accent);
+  padding-left: 12px;
+  color: var(--th-muted);
+}
+.terrier-app .source-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--th-muted);
+}
+.terrier-app .answer-meta {
+  font-size: 10px;
+  color: var(--th-muted);
+  display: block;
+  margin-top: 12px;
+}
+.terrier-app .progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--th-primary);
+  font-size: 13px;
+}
+.terrier-app .pulse {
+  height: 8px;
+  width: 8px;
+  border-radius: 50%;
+  background: var(--th-accent);
+  animation: th-pulse 1.3s infinite;
+}
+@keyframes th-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+.terrier-app .library-panel {
+  padding: 24px;
+}
+.terrier-app .library-panel h2 {
+  font-size: 20px;
+  margin: 10px 0 20px;
+}
+.terrier-app .count {
+  font-size: 12px;
+  background: #edf3fb;
+  padding: 3px 8px;
+  border-radius: 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.terrier-app .source-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+}
+.terrier-app .source-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--th-border);
+}
+.terrier-app .source-list a {
+  font-size: 12px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.terrier-app .source-list small {
+  display: block;
+  font-size: 10px;
+  color: var(--th-muted);
+  margin-top: 4px;
+}
+.terrier-app .pdf-icon {
+  background: #fff0f2;
+  color: #a9112b;
+  font-size: 9px;
+  border-radius: 5px;
+  padding: 7px 5px;
+  flex-shrink: 0;
+}
+.terrier-app .library-footnote {
+  border-top: 1px solid var(--th-border);
+  margin-top: 24px;
+  padding-top: 18px;
+}
+.terrier-app .library-footnote h3 {
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+.terrier-app .library-footnote p {
+  font-size: 11px;
+  color: var(--th-muted);
+  line-height: 1.8;
+  margin: 8px 0;
+}
+.terrier-app .empty-library {
+  padding: 16px 0;
+  color: var(--th-muted);
+}
+.terrier-app .empty-library h3 {
+  font-size: 16px;
+  color: var(--th-ink);
+  margin: 0 0 8px;
+}
+.terrier-app .empty-library p {
+  font-size: 13px;
+  margin: 0 0 15px;
+}
+.terrier-app .notice {
+  background: #fff8e9;
+  border: 1px solid #e5d5a8;
+  color: #6f541e;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.terrier-app .notice.error {
+  background: #fff0f2;
+  border-color: #efc2ca;
+  color: #8d1630;
+}
+.terrier-app .notice button {
+  background: transparent;
+  color: inherit;
+  font-size: 20px;
+}
+.terrier-app footer {
+  font-size: 10px;
+  color: var(--th-muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 26px;
+}
+.terrier-app footer button {
+  background: transparent;
+  color: var(--th-primary);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.terrier-app .admin-panel {
+  padding: 28px;
+}
+.terrier-app .panel-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.terrier-app .admin-summary {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  flex-wrap: wrap;
+  border-block: 1px solid var(--th-border);
+  padding: 18px 0;
+  margin: 22px 0;
+  font-size: 13px;
+}
+.terrier-app .admin-summary strong {
+  font-size: 20px;
+  color: var(--th-primary);
+  margin-right: 4px;
+}
+.terrier-app .admin-summary p {
+  color: var(--th-muted);
+  margin: 0;
+  flex: 1;
+  min-width: 220px;
+}
+.terrier-app .upload-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  position: relative;
+  border: 1px dashed #91a8c5;
+  padding: 28px;
+  border-radius: 12px;
+  background: #f4f7fc;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.terrier-app .upload-box input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.terrier-app .upload-box:focus-within {
+  outline: 3px solid #397cce;
+}
+.terrier-app .upload-box span {
+  color: var(--th-muted);
+  font-size: 12px;
+}
+.terrier-app .upload-box .upload-symbol {
+  font-size: 28px;
+  color: var(--th-primary);
+}
+.terrier-app .privacy-note {
+  font-size: 12px;
+  color: var(--th-muted);
+  margin: 14px 0 22px;
+}
+.terrier-app .admin-documents {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 16px;
+}
+.terrier-app .document-card {
+  border: 1px solid var(--th-border);
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 0;
+}
+.terrier-app .document-top {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.terrier-app .document-top h3 {
+  font-size: 15px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  flex: 1;
+}
+.terrier-app .status-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: #f1f3f6;
+  border: 1px solid var(--th-border);
+  border-radius: 20px;
+  padding: 4px 8px;
+}
+.terrier-app .status-tag.published {
+  background: #e9f4ec;
+  color: #236139;
+  border-color: #b9d7c2;
+}
+.terrier-app .document-status,
+.terrier-app .document-version {
+  font-size: 12px;
+  color: var(--th-muted);
+  margin: 12px 0 4px;
+}
+.terrier-app .document-warning {
+  font-size: 12px;
+  color: #9b2235;
+}
+.terrier-app .document-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.terrier-app .document-actions button,
+.terrier-app .document-actions a {
+  font-size: 11px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.terrier-app .primary-button,
+.terrier-app .secondary-button,
+.terrier-app .danger-button {
+  border-radius: 7px;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.terrier-app .primary-button {
+  background: var(--th-primary);
+  color: #fff;
+}
+.terrier-app .secondary-button {
+  background: #edf3fb;
+  color: var(--th-primary);
+  border: 1px solid var(--th-border);
+}
+.terrier-app .danger-button {
+  color: #a7112c;
+  background: #fff1f3;
+}
+.terrier-app .login-panel {
+  max-width: 530px;
+  padding: 32px;
+  margin: 0 auto 40px;
+}
+.terrier-app .login-panel p {
+  font-size: 14px;
+  color: var(--th-muted);
+}
+.terrier-app .login-panel form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 24px 0;
+}
+.terrier-app .login-panel label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.terrier-app .login-panel input {
+  border: 1px solid #a6b8ce;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 16px;
+  width: 100%;
+}
+.terrier-app .login-panel > a {
+  font-size: 13px;
+}
+.terrier-app .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.terrier-app.compact {
+  min-height: 0;
+}
+.terrier-app.compact .topbar,
+.terrier-app.compact .intro,
+.terrier-app.compact .library-panel {
+  display: none;
+}
+.terrier-app.compact .workspace-grid {
+  grid-template-columns: 1fr;
+}
+.terrier-app.compact main {
+  padding: 12px;
+}
+@media (max-width: 1000px) {
+  .terrier-app .workspace-grid {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+  .terrier-app .intro-stamp {
+    display: none;
+  }
+  .terrier-app .library-panel {
+    padding: 20px;
+  }
+  .terrier-app .grounded-badge {
+    display: none;
+  }
+}
+@media (max-width: 720px) {
+  .terrier-app .topbar {
+    padding: 14px 5%;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .terrier-app .brand {
+    font-size: 20px;
+  }
+  .terrier-app .brand-mark {
+    width: 38px;
+    height: 38px;
+  }
+  .terrier-app nav {
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-end;
+    font-size: 11px;
+  }
+  .terrier-app main {
+    padding: 20px 4%;
+  }
+  .terrier-app .intro {
+    padding: 26px 24px;
+    border-radius: 12px;
+  }
+  .terrier-app h1 {
+    font-size: 32px;
+    letter-spacing: -1px;
+  }
+  .terrier-app .intro p {
+    font-size: 13px;
+  }
+  .terrier-app .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+  .terrier-app .chat-heading {
+    padding: 20px;
+  }
+  .terrier-app .conversation {
+    height: 440px;
+    padding: 18px;
+  }
+  .terrier-app .composer {
+    margin: 0 14px;
+  }
+  .terrier-app .composer textarea {
+    font-size: 16px;
+  }
+  .terrier-app .empty-chat h3 {
+    font-size: 23px;
+  }
+  .terrier-app .chat-panel {
+    min-height: 640px;
+  }
+  .terrier-app .message {
+    padding: 16px;
+    font-size: 14px;
+  }
+  .terrier-app .message.user {
+    margin-left: 5%;
+  }
+  .terrier-app .library-panel {
+    order: 2;
+  }
+  .terrier-app .admin-panel {
+    padding: 18px;
+  }
+  .terrier-app .panel-title {
+    align-items: flex-start;
+  }
+  .terrier-app .upload-box {
+    flex-direction: column;
+    padding: 24px 12px;
+    text-align: center;
+  }
+  .terrier-app .login-panel {
+    padding: 24px;
+  }
+  .terrier-app footer {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .terrier-app footer button {
+    align-self: flex-start;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .terrier-app .pulse {
+    animation: none;
+  }
+  .terrier-app .conversation {
+    scroll-behavior: auto;
+  }
+}

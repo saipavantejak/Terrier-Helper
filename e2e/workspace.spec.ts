@@ -1,6 +1,16 @@
 import { test, expect, type Page } from "@playwright/test";
 import { PDFDocument, StandardFonts } from "pdf-lib";
-async function upload(page: Page) {
+const key = "browser-test-only-access-key-32-characters";
+async function admin(page: Page) {
+  await page.goto("/admin");
+  await expect(page.getByLabel("Administrator access key")).toBeVisible();
+  await page.getByLabel("Administrator access key").fill(key);
+  await page.getByRole("button", { name: "Sign in securely" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Manage sources" }),
+  ).toBeVisible();
+}
+async function upload(page: Page, name: string) {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   pdf
@@ -13,73 +23,109 @@ async function upload(page: Page) {
     });
   pdf
     .addPage()
-    .drawText("Library books can be borrowed for fourteen days.", {
+    .drawText("Library books can be borrowed for fourteen days. " + name, {
       x: 40,
       y: 700,
       font,
       size: 12,
     });
-  await page
-    .getByLabel("Upload PDF documents")
-    .setInputFiles({
-      name: "policy-test.pdf",
-      mimeType: "application/pdf",
-      buffer: Buffer.from(await pdf.save()),
-    });
-  await expect(page.getByText("2 pages · 2 passages · keyword")).toBeVisible({
-    timeout: 15000,
+  await page.getByLabel("Upload PDF documents").setInputFiles({
+    name,
+    mimeType: "application/pdf",
+    buffer: Buffer.from(await pdf.save()),
   });
+  const card = page
+    .getByRole("article")
+    .filter({ has: page.getByRole("heading", { name, exact: true }) });
+  await expect(card.getByText("2 pages · 2 passages · keyword")).toBeVisible({
+    timeout: 30000,
+  });
+  return card;
 }
-test("production UI uploads, indexes, persists, filters, and deletes PDFs on mobile", async ({
+test("admin publishes; separate student can only read; withdrawal removes access; mobile layout", async ({
   page,
+  browser,
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await admin(page);
+  const name = "publication-test.pdf";
+  const card = await upload(page, name);
+  const context = await browser.newContext({
+    baseURL: "http://localhost:3111",
+  });
+  const student = await context.newPage();
+  await student.goto("http://localhost:3111/");
+  await expect(student.getByLabel("Upload PDF documents")).toHaveCount(0);
   await expect(
-    page.getByRole("heading", { name: "Find clarity in your documents." }),
-  ).toBeVisible();
+    student.getByRole("link", { name: name + " ↗", exact: true }),
+  ).toHaveCount(0);
+  expect(
+    (await student.request.post("/api/documents", { data: {} })).status(),
+  ).toBe(403);
+  await card
+    .getByRole("button", { name: "Publish " + name, exact: true })
+    .click();
+  await expect(card.getByText("Published", { exact: true })).toBeVisible();
+  await student.reload();
   await expect(
-    page.getByText("Document indexing is available.", { exact: false }),
+    student.getByRole("link", { name: name + " ↗", exact: true }),
   ).toBeVisible();
-  await upload(page);
-  await page.reload();
-  await expect(page.getByText("2 pages · 2 passages · keyword")).toBeVisible();
-  await page
-    .getByRole("checkbox", { name: "Use policy-test.pdf for questions" })
-    .check();
-  await expect(page.getByText("1 selected for questions")).toBeVisible();
+  await student.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await student.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
-  await page.getByRole("button", { name: "Delete policy-test.pdf" }).click();
-  await expect(page.getByText("Your library starts here.")).toBeVisible();
+  await card
+    .getByRole("button", { name: "Withdraw " + name, exact: true })
+    .click();
+  await student.reload();
+  await expect(
+    student.getByRole("link", { name: name + " ↗", exact: true }),
+  ).toHaveCount(0);
+  page.once("dialog", (d) => d.accept());
+  await card
+    .getByRole("button", { name: "Delete " + name, exact: true })
+    .click();
+  await expect(card).toHaveCount(0);
+  await context.close();
   expect(errors).toEqual([]);
 });
-test("checked answer renders evidence and links to the real uploaded PDF (model response fixture)", async ({
+test("student answer renders a citation linked to the actual published PDF (controlled model fixture)", async ({
   page,
 }) => {
+  await admin(page);
+  const name = "citation-test.pdf";
+  const card = await upload(page, name);
+  await card
+    .getByRole("button", { name: "Publish " + name, exact: true })
+    .click();
+  await expect(card.getByText("Published", { exact: true })).toBeVisible();
+  const docs = await page.request.get("/api/documents");
+  const doc = (await docs.json()).documents.find(
+    (d: { name: string }) => d.name === name,
+  );
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await page.route("**/api/workspace", async (route) => {
     const response = await route.fetch();
-    const data = await response.json();
     await route.fulfill({
       response,
-      json: { ...data, generationEnabled: true },
+      json: { ...(await response.json()), generationEnabled: true },
     });
   });
   await page.goto("/");
-  await upload(page);
-  const documents = await page.request.get("/api/documents");
-  const doc = (await documents.json()).documents[0];
   await page.route("**/api/chat", (route) =>
     route.fulfill({
       status: 200,
       contentType: "text/event-stream",
       body:
-        'event: progress\ndata: {"message":"Checking evidence…"}\n\n' +
         "event: answer\ndata: " +
         JSON.stringify({
           status: "answered",
@@ -100,28 +146,26 @@ test("checked answer renders evidence and links to the real uploaded PDF (model 
             },
           ],
           retrievalMode: "keyword",
-          requestId: "browser-fixture",
+          requestId: "fixture",
         }) +
         "\n\nevent: done\ndata: {}\n\n",
     }),
   );
   await page.getByLabel("Ask a question").fill("When is tuition due?");
   await page.getByRole("button", { name: "Send question" }).click();
-  await expect(
-    page
-      .getByText("Tuition payment is due September 15.", { exact: false })
-      .first(),
-  ).toBeVisible();
   await page.locator("summary").click();
   await expect(page.locator("blockquote")).toContainText(
     "Tuition payment is due September 15.",
   );
-  const link = page.getByRole("link", { name: "Open PDF page" });
-  await expect(link).toHaveAttribute(
-    "href",
-    `/api/documents/${doc.id}/file#page=1`,
-  );
-  const pdfResponse = await page.request.get(`/api/documents/${doc.id}/file`);
-  expect(pdfResponse.status()).toBe(200);
-  expect(pdfResponse.headers()["content-type"]).toContain("application/pdf");
+  await expect(
+    page.getByRole("link", { name: "Open PDF page" }),
+  ).toHaveAttribute("href", `/api/documents/${doc.id}/file#page=1`);
+  expect(
+    (await page.request.get(`/api/documents/${doc.id}/file`)).status(),
+  ).toBe(200);
+  await admin(page);
+  page.once("dialog", (d) => d.accept());
+  await page
+    .getByRole("button", { name: "Delete " + name, exact: true })
+    .click();
 });

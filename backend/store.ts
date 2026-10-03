@@ -1,3 +1,4 @@
+import { documentLimits } from "./limits.js";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -37,6 +38,11 @@ export class Store {
       CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY, createdAt TEXT NOT NULL, data TEXT NOT NULL);
     `);
+    const columns = this.db.prepare("PRAGMA table_info(documents)").all();
+    if (!columns.some((c) => c.name === "published"))
+      this.db.exec(
+        "ALTER TABLE documents ADD COLUMN published INTEGER NOT NULL DEFAULT 0",
+      );
     this.db
       .prepare("UPDATE documents SET status='queued' WHERE status='processing'")
       .run();
@@ -56,6 +62,22 @@ export class Store {
       .run(token, Date.now() + 30 * 86400000);
     return token;
   }
+  ensureInstitution(id: string) {
+    this.db
+      .prepare(
+        "INSERT INTO owners(id,expires) VALUES(?,?) ON CONFLICT(id) DO NOTHING",
+      )
+      .run(id, Number.MAX_SAFE_INTEGER);
+  }
+  setPublished(owner: string, id: string, published: boolean) {
+    return (
+      this.db
+        .prepare(
+          "UPDATE documents SET published=? WHERE owner=? AND id=? AND (status='ready' OR ?=0)",
+        )
+        .run(published ? 1 : 0, owner, id, published ? 1 : 0).changes > 0
+    );
+  }
   cleanup() {
     this.db.prepare("DELETE FROM owners WHERE expires<=?").run(Date.now());
     this.db
@@ -66,10 +88,10 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT id,name,version,createdAt,status,pages,chunks,error,warning,semantic FROM documents WHERE owner=? ORDER BY createdAt DESC",
+          "SELECT id,name,version,createdAt,status,pages,chunks,error,warning,semantic,published FROM documents WHERE owner=? ORDER BY createdAt DESC",
         )
         .all(owner) as unknown as KnowledgeDocument[]
-    ).map((d) => ({ ...d, semantic: !!d.semantic }));
+    ).map((d) => ({ ...d, semantic: !!d.semantic, published: !!d.published }));
   }
   add(owner: string, name: string, bytes: Buffer) {
     const hash = crypto.createHash("sha256").update(bytes).digest("hex");
@@ -85,10 +107,11 @@ export class Store {
     const global = this.db
       .prepare("SELECT COALESCE(SUM(length(bytes)),0) size FROM documents")
       .get()!;
+    const limits = documentLimits(owner, false);
     if (
-      Number(total.n) >= 30 ||
-      Number(total.size) + bytes.length > 100 * 1024 * 1024 ||
-      Number(global.size) + bytes.length > 1024 ** 3
+      Number(total.n) >= limits.count ||
+      Number(total.size) + bytes.length > limits.bytes ||
+      Number(global.size) + bytes.length > limits.total
     )
       throw new Error(
         "Document storage quota reached. Delete documents before uploading more.",
@@ -131,7 +154,7 @@ export class Store {
   }
   mark(id: string, status: string, error: string | null = null) {
     this.db
-      .prepare("UPDATE documents SET status=?,error=? WHERE id=?")
+      .prepare("UPDATE documents SET status=?,error=?,published=0 WHERE id=?")
       .run(status, error, id);
   }
   saveChunks(

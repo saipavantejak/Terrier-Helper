@@ -12,6 +12,7 @@ export default defineConfig({
     timeout: 30000,
     env: {
       PORT: "3111",
+      ADMIN_ACCESS_KEY: "browser-test-only-access-key-32-characters",
       DATABASE_PATH: "data/browser-tests.sqlite",
       GEMINI_API_KEY: "",
       API_KEY: "",

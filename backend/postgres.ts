@@ -1,3 +1,4 @@
+import { documentLimits } from "./limits.js";
 import pg from "pg";
 import crypto from "node:crypto";
 import { tokens } from "./retrieval.js";
@@ -41,6 +42,22 @@ export class PostgresStore implements Storage {
     ]);
     return token;
   }
+  async ensureInstitution(id: string) {
+    await this.pool.query(
+      "INSERT INTO owners(id,expires) VALUES($1,$2) ON CONFLICT(id) DO NOTHING",
+      [id, Number.MAX_SAFE_INTEGER],
+    );
+  }
+  async setPublished(owner: string, id: string, published: boolean) {
+    return (
+      (
+        await this.pool.query(
+          "UPDATE documents SET published=$3 WHERE owner=$1 AND id=$2 AND (status='ready' OR NOT $3) RETURNING id",
+          [owner, id, published],
+        )
+      ).rowCount! > 0
+    );
+  }
   async cleanup() {
     await this.pool.query("DELETE FROM owners WHERE expires<=$1", [Date.now()]);
     await this.pool.query('DELETE FROM events WHERE "createdAt"<$1', [
@@ -54,7 +71,7 @@ export class PostgresStore implements Storage {
   async list(owner: string): Promise<KnowledgeDocument[]> {
     return (
       await this.pool.query(
-        'SELECT id,name,version,"createdAt",status,pages,chunks,error,warning,semantic FROM documents WHERE owner=$1 ORDER BY "createdAt" DESC',
+        'SELECT id,name,version,"createdAt",status,pages,chunks,error,warning,semantic,published FROM documents WHERE owner=$1 ORDER BY "createdAt" DESC',
         [owner],
       )
     ).rows;
@@ -80,10 +97,11 @@ export class PostgresStore implements Storage {
           [owner],
         )
       ).rows[0];
+      const limits = documentLimits(owner, true);
       if (
-        +totals.n >= 10 ||
-        +totals.size + bytes.length > 20 * 1024 ** 2 ||
-        +totals.total + bytes.length > 100 * 1024 ** 2
+        +totals.n >= limits.count ||
+        +totals.size + bytes.length > limits.bytes ||
+        +totals.total + bytes.length > limits.total
       )
         throw new Error(
           "Document storage quota reached. Delete documents before uploading more.",
@@ -131,7 +149,7 @@ export class PostgresStore implements Storage {
   }
   async mark(id: string, status: string, error: string | null = null) {
     await this.pool.query(
-      "UPDATE documents SET status=$2,error=$3,lease=NULL,lease_until=NULL,attempts=0 WHERE id=$1",
+      "UPDATE documents SET status=$2,error=$3,published=false,lease=NULL,lease_until=NULL,attempts=0 WHERE id=$1",
       [id, status, error],
     );
   }

@@ -8,14 +8,15 @@ This repository has two entry points: `server.ts` for local/Docker SQLite use, a
 2. Connect a dedicated **Neon PostgreSQL** database through the project's Storage/Marketplace page. Choose an available free plan if appropriate; review its current limits before accepting. Use a pooled connection string as **DATABASE_URL**. PostgreSQL must support the `vector` extension. Do not connect an unrelated application's database.
 3. In Settings → Environment Variables, add the following for **Production**:
 
-| Name | Value |
-| --- | --- |
-| `DATABASE_URL` | Dedicated PostgreSQL pooled connection string; integration may create this automatically |
-| `GEMINI_API_KEY` | Your Google AI Studio key; never use a `VITE_` prefix |
-| `GEMINI_MODEL` | A model available to your account; code defaults to `gemini-3.5-flash` |
-| `EMBEDDING_MODEL` | `gemini-embedding-001` (768 dimensions) |
-| `CRON_SECRET` | A randomly generated secret of at least 32 characters |
-| `APP_ORIGIN` | Exact final production origin, e.g. `https://your-project.vercel.app` |
+| Name               | Value                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`     | Dedicated PostgreSQL pooled connection string; integration may create this automatically   |
+| `GEMINI_API_KEY`   | Your Google AI Studio key; never use a `VITE_` prefix                                      |
+| `GEMINI_MODEL`     | A model available to your account; code defaults to `gemini-3.5-flash`                     |
+| `EMBEDDING_MODEL`  | `gemini-embedding-001` (768 dimensions)                                                    |
+| `ADMIN_ACCESS_KEY` | Random server-only secret of at least 32 characters for `/admin`; never a `VITE_` variable |
+| `CRON_SECRET`      | A randomly generated secret of at least 32 characters                                      |
+| `APP_ORIGIN`       | Exact final production origin, e.g. `https://your-project.vercel.app`                      |
 
 4. Deploy. `npm run vercel:build` runs an idempotent, transaction-locked schema migration and then the production build. A missing database or unavailable pgvector extension fails the build explicitly. Set the final `APP_ORIGIN` after Vercel assigns the domain and redeploy. Without this variable, the API uses the request's HTTPS host.
 5. Open `/api/health` on the resulting domain: it must return `{"status":"ok"}`. Open the homepage and perform the acceptance checks below.
@@ -26,39 +27,37 @@ The repository being ready for deployment is not evidence that a deployment exis
 
 ## Mobile acceptance checks
 
-- Upload a text PDF smaller than **3 MB**. Keep the page open until it becomes Ready. Ask a question answered by a specific passage, open its citation, and check its page and exact quote.
-- Ask a question outside the document. Expect insufficient evidence rather than invented information.
-- Reload. The PDF should still be present. Open an incognito window: it should have an empty, separate workspace.
-- Delete the PDF. Its file URL must no longer work; subsequent questions cannot use it.
-- On a temporary test deployment, remove the model key and redeploy. Generation must show unavailable; uploads and keyword indexing still work. Restore the key and reindex to add semantic search.
+- Open `/admin` and sign in with the configured administrator key. Upload a text PDF smaller than **3 MiB**. Keep the page open until it becomes Ready; review its contents, then Publish.
+- Open the homepage in an incognito window. It should show the same published college sources and no upload controls. Drafts must be absent.
+- Ask a question answered by a specific passage, open its citation, and check its page and exact quote. Ask an unrelated question and expect insufficient evidence.
+- Withdraw the PDF in the admin tab. Refresh the student tab: the source and direct file access must disappear. Reindexing also withdraws a source until an administrator republishes it.
+- Delete only your test PDF after checking it. See [administrator setup](ADMIN.md) for the complete publishing workflow.
 
 ## Operational behavior and limits
 
 - Maximum PDF: **3 MiB**, 300 pages, 500 chunks. Base64 expansion remains below Vercel's 4.5 MB function payload limit. Larger files require a future private object-storage direct-upload flow.
-- Maximum workspace: 10 PDFs / 20 MiB of original bytes. Application-wide: 100 MiB of original bytes. Extracted text, vectors, database overhead, and backups are additional.
+- Default college corpus: 100 PDFs / 80 MiB of original bytes. Application-wide: 100 MiB of original bytes. Extracted text, vectors, database overhead, and backups are additional.
 - Small original PDFs use PostgreSQL `bytea`, keeping ownership, deletion, and quota checks transactional. This is a deliberate bounded-demo tradeoff. Move originals to private object storage before increasing limits or scale.
-- Browser polling requests `/api/process`; each request awaits one owner-scoped job. PostgreSQL leases prevent simultaneous processing within a workspace. A killed invocation can be reclaimed after five minutes; fencing prevents stale workers from overwriting a retry or deleted document. After three interrupted attempts the document fails visibly. Reopen the page to resume: this is not an autonomous always-running queue.
+- Browser polling requests `/api/process`; each admin request awaits one institution-scoped job. PostgreSQL leases prevent simultaneous processing within the college processing request. A killed invocation can be reclaimed after five minutes; fencing prevents stale workers from overwriting a retry or deleted document. After three interrupted attempts the document fails visibly. Reopen the admin page to resume. For independent processing, deploy `npm run worker` as a long-running Node process with the same PostgreSQL configuration; this worker is not automatically provisioned on Vercel.
 - Function duration: 300 seconds. Embeddings have a 210-second total cancellation budget; failures preserve keyword indexing. Answer generation has a 90-second cancellation budget.
-- Distributed database rate limits supplement local IP limits: uploads 8/minute/workspace, chat 15/minute/workspace and 100/hour/application, one active answer/workspace. Limits are a demo abuse control, not an authentication substitute or hard provider-spend guarantee. Configure provider budgets and Vercel spend controls.
-- Cloud search retrieves at most 50 lexical and 50 semantic candidates using PostgreSQL full-text search and exact pgvector cosine distance within owned, ready documents. Application BM25 and cosine RRF rerank this candidate set. This differs from local SQLite's full-workspace candidate scan; the synthetic local benchmark does not measure cloud candidate recall. pgvector exact search avoids approximate-index filtering surprises at this bounded size; benchmark before adding HNSW.
-- Daily authenticated Vercel Cron removes expired workspaces and telemetry. Access ends at 30 days; physical application deletion follows the next successful daily cleanup. Monitor cron failures. Database backups have a separate retention policy.
+- Distributed database rate limits supplement local IP limits: uploads 8/minute/session, chat 15/minute/actor and 100/hour/application, one active answer/actor. IP-based limits also apply. The shared college corpus does not serialize all students behind a single chat lock. Limits are a demo abuse control, not an authentication substitute or hard provider-spend guarantee. Configure provider budgets and Vercel spend controls.
+- Cloud search retrieves at most 50 lexical and 50 semantic candidates using PostgreSQL full-text search and exact pgvector cosine distance within the selected published, ready college documents. Application BM25 and cosine RRF rerank this candidate set. This differs from local SQLite's full-workspace candidate scan; the synthetic local benchmark does not measure cloud candidate recall. pgvector exact search avoids approximate-index filtering surprises at this bounded size; benchmark before adding HNSW.
+- Daily authenticated Vercel Cron removes expired anonymous sessions, legacy private workspaces, and telemetry. College documents do not expire with student sessions and remain until admin deletion. Monitor cron failures. Database backups have a separate retention policy.
 - `/api/health` checks database/schema access, not model availability. Operational events include request ID, latency, status and token usage, excluding questions and source text. Use Vercel runtime logs and database events to investigate errors without logging secrets.
 
 ## Tests and maintenance
 
 CI starts PostgreSQL 17 with pgvector, runs real database integration checks plus existing unit/API/browser checks. To run those database tests locally, supply `TEST_DATABASE_URL` pointing to a **disposable test database**. Never point tests at production.
 
-Current migrations are additive and idempotent. For future changes, use versioned migrations and backward-compatible expand/contract steps before rolling deployments. Restrict the runtime database role and separate migration privileges before an institutional production rollout. Back up and restore-test your database. No SSO, OCR, autonomous durable queue, large-corpus load test, or human-reviewed answer-quality certification is claimed.
+Current migrations are additive and idempotent. For future changes, use versioned migrations and backward-compatible expand/contract steps before rolling deployments. Restrict the runtime database role and separate migration privileges before an institutional production rollout. Back up and restore-test your database. The host SSO adapter and optional PostgreSQL worker are supplied as integration points; no SSO provider or worker infrastructure is automatically provisioned. OCR, large-corpus load testing, and human-reviewed answer-quality certification are not included.
 
 References: [Vercel function limits](https://vercel.com/docs/functions/limitations), [pgvector](https://github.com/pgvector/pgvector).
-
 
 ### Gemini generation diagnostics
 
 `npm run diagnose:gemini` performs one small, synthetic generation request per distinct configured model using the server-side Gemini key and configured primary/fallback models. It prints model IDs, response status, and sanitized errors, never the key or uploaded documents. Run it only when diagnosing provider availability; normal deployments do not make these calls. These requests may consume provider quota.
 
 On September 29, 2026, a minimal production deployment probe isolated a 503 on `gemini-3.8-flash`: Google reported high demand. `gemini-3.5-flash` responded, and the live RAG workflow subsequently returned the known fourteen-day borrowing period with an exact quotation and page citation. This confirms recovery through the existing same-provider fallback, not a guarantee of future provider availability.
-
 
 On September 30 UTC, the same live question failed again after the single fallback attempt. Generation now makes at most three attempts (primary, fallback, fallback), with cancellation-aware backoff for HTTP 500/502/503/504 only. Each attempt logs its stage, model, status and latency without prompts, responses or credentials. Both answering and verification remain mandatory; provider errors never become fabricated answers. These retries mitigate transient failures but cannot guarantee availability when both models are unavailable.
 

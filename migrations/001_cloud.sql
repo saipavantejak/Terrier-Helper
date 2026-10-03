@@ -20,3 +20,7 @@ CREATE INDEX IF NOT EXISTS chunks_search ON chunks USING gin(search);
 CREATE TABLE IF NOT EXISTS events (id uuid PRIMARY KEY, "createdAt" text NOT NULL, data jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS rate_limits (key text PRIMARY KEY, count integer NOT NULL, expires bigint NOT NULL);
 CREATE TABLE IF NOT EXISTS leases (key text PRIMARY KEY, token uuid NOT NULL, expires bigint NOT NULL);
+
+-- Additive migration: existing private documents remain unpublished.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS published boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS documents_published_owner ON documents(owner) WHERE published AND status='ready';

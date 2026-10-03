@@ -2,18 +2,22 @@ import type { Answer, KnowledgeDocument } from "./types";
 export async function api<T>(
   url: string,
   options: RequestInit = {},
+  base = "/api",
 ): Promise<T> {
-  const response = await fetch(url, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...options.headers },
-  });
+  const response = await fetch(
+    base.replace(/\/$/, "") + url.replace(/^\/api/, ""),
+    {
+      ...options,
+      headers: { "Content-Type": "application/json", ...options.headers },
+    },
+  );
   const data = await response
     .json()
     .catch(() => ({ error: "Unexpected server response." }));
   if (!response.ok) throw new Error(data.error || "Request failed.");
   return data as T;
 }
-export async function uploadDocument(file: File, maxMB = 10) {
+export async function uploadDocument(file: File, maxMB = 10, base = "/api") {
   if (
     file.size > maxMB * 1024 * 1024 ||
     !file.name.toLowerCase().endsWith(".pdf")
@@ -25,10 +29,14 @@ export async function uploadDocument(file: File, maxMB = 10) {
     reader.onerror = () => reject(new Error("Could not read file."));
     reader.readAsDataURL(file);
   });
-  return api<{ id: string; documents: KnowledgeDocument[] }>("/api/documents", {
-    method: "POST",
-    body: JSON.stringify({ name: file.name, base64 }),
-  });
+  return api<{ id: string; documents: KnowledgeDocument[] }>(
+    "/api/documents",
+    {
+      method: "POST",
+      body: JSON.stringify({ name: file.name, base64 }),
+    },
+    base,
+  );
 }
 export async function ask(
   question: string,
@@ -36,8 +44,9 @@ export async function ask(
   previousQuestion: string | undefined,
   onProgress: (text: string) => void,
   signal: AbortSignal,
+  base = "/api",
 ): Promise<Answer> {
-  const response = await fetch("/api/chat", {
+  const response = await fetch(base.replace(/\/$/, "") + "/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, documentIds, previousQuestion }),

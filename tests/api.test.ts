@@ -41,7 +41,7 @@ function setup(
     },
     verify: async () => ({ supported: [!options.unsupported], tokens: 6 }),
   };
-  const app = createApp(store, provider);
+  const app = createApp(store, provider, undefined, { mode: "workspace" });
   const agent = request.agent(app);
   return { store, app, agent };
 }
@@ -219,19 +219,19 @@ test("PDF upload flows through indexing, retrieval, answer, and deletion", async
     verify: async () => ({ supported: [true], tokens: 5 }),
   };
   const worker = ingestionWorker(store, provider);
-  const agent = request.agent(createApp(store, provider, worker.wake));
+  const agent = request.agent(
+    createApp(store, provider, worker.wake, { mode: "workspace" }),
+  );
   try {
     await agent.get("/api/workspace").expect(200);
     const pdf = await PDFDocument.create();
     const font = await pdf.embedFont(StandardFonts.Helvetica);
-    pdf
-      .addPage()
-      .drawText("Tuition payment is due on September 15.", {
-        x: 30,
-        y: 700,
-        font,
-        size: 12,
-      });
+    pdf.addPage().drawText("Tuition payment is due on September 15.", {
+      x: 30,
+      y: 700,
+      font,
+      size: 12,
+    });
     const response = await agent
       .post("/api/documents")
       .send({

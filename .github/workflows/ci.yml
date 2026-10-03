@@ -28,6 +28,7 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run test:runtime
+      - run: npm run build:widget
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
       - name: Browser workflow against PostgreSQL cloud storage

@@ -32,9 +32,11 @@ test(
           "utf8",
         ),
       );
-      const app = createApp(store, noAI),
+      const app = createApp(store, noAI, undefined, { mode: "workspace" }),
         agent = request.agent(app),
-        stranger = request.agent(createApp(replica, noAI));
+        stranger = request.agent(
+          createApp(replica, noAI, undefined, { mode: "workspace" }),
+        );
       const ws = await agent.get("/api/workspace").expect(200);
       owners.push(ws.headers["set-cookie"][0].split(";")[0].split("=")[1]);
       const ws2 = await stranger.get("/api/workspace").expect(200);

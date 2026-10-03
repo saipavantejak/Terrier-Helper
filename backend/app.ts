@@ -6,7 +6,19 @@ import { z } from "zod";
 import type { Storage } from "./storage.js";
 import { processOne } from "./ingest.js";
 import { retrieve } from "./retrieval.js";
-import { safeAnswerError, validateCitations, type Provider } from "./provider.js";
+import {
+  safeAnswerError,
+  validateCitations,
+  type Provider,
+} from "./provider.js";
+import {
+  defaultInstitution,
+  institutionOwner,
+  equalSecret,
+  isAdmin,
+  signAdmin,
+  type AppOptions,
+} from "./institution.js";
 import type { Answer } from "../types.js";
 
 const uploadSchema = z
@@ -35,8 +47,42 @@ export function createApp(
   store: Storage,
   provider: Provider,
   wake: () => void = () => {},
+  options: AppOptions = {},
 ) {
   const app = express();
+  const college = options.mode !== "workspace";
+  const institution = options.institution || defaultInstitution;
+  const corpus = institutionOwner(institution.id);
+  const adminKey = options.adminKey ?? process.env.ADMIN_ACCESS_KEY ?? "";
+  let initialized: Promise<void> | undefined;
+  const ensureCorpus = () =>
+    (initialized ??= Promise.resolve(store.ensureInstitution(corpus)).catch(
+      (e) => {
+        initialized = undefined;
+        throw e;
+      },
+    ));
+  const visibleDocuments = async (res: express.Response) => {
+    const docs = await store.list(res.locals.corpus);
+    return college && !res.locals.admin
+      ? docs.filter((d) => d.published && d.status === "ready")
+      : docs;
+  };
+  const requireAdmin: express.RequestHandler = (_req, res, next) => {
+    if (college && !res.locals.admin)
+      return void res
+        .status(403)
+        .json({ error: "Administrator access required." });
+    next();
+  };
+  const audit = (res: express.Response, event: string, documentId?: string) =>
+    store.record({
+      event,
+      documentId,
+      institutionId: institution.id,
+      actor: res.locals.actor,
+      requestId: res.locals.requestId,
+    });
   const cloud = !!store.claimJob;
   const maxBytes = (cloud ? 3 : 10) * 1024 * 1024;
   app.disable("x-powered-by");
@@ -112,7 +158,8 @@ export function createApp(
       .map((v) => v.trim())
       .find((v) => v.startsWith("terrier_owner="))
       ?.slice(14);
-    if (await store.owner(token)) res.locals.owner = token;
+    if (token && /^[a-f0-9]{64}$/.test(token) && (await store.owner(token)))
+      res.locals.owner = token;
     else if (req.path === "/workspace" && req.method === "GET") {
       res.locals.owner = await store.createOwner();
       res.cookie("terrier_owner", res.locals.owner, {
@@ -126,22 +173,110 @@ export function createApp(
       return res.status(401).json({
         error: "Workspace expired. Reload to create a new workspace.",
       });
+    res.locals.actor = crypto
+      .createHash("sha256")
+      .update(res.locals.owner)
+      .digest("hex");
+    res.locals.admin =
+      !college || isAdmin(req, adminKey, res.locals.owner, institution.id);
+    if (college && options.authenticate) {
+      const identity = await options.authenticate(req);
+      if (identity && identity.institutionId !== institution.id)
+        return res.status(403).json({ error: "Institution access denied." });
+      // Supplying an adapter makes it authoritative; bootstrap cookies cannot bypass it.
+      res.locals.admin = identity?.role === "admin";
+      if (identity)
+        res.locals.actor = crypto
+          .createHash("sha256")
+          .update(identity.institutionId + ":" + identity.subject)
+          .digest("hex");
+    }
+    if (college) await ensureCorpus();
+    res.locals.corpus = college ? corpus : res.locals.owner;
     next();
   });
   app.use("/api", express.json({ limit: cloud ? "4.2mb" : "14mb" }));
+  app.post(
+    "/api/admin/login",
+    rateLimit({
+      windowMs: 15 * 60000,
+      limit: 5,
+      standardHeaders: "draft-8",
+      legacyHeaders: false,
+    }),
+    async (req, res) => {
+      if (!college || options.authenticate || adminKey.length < 32)
+        return res.status(503).json({
+          error:
+            "Administrator sign-in is not configured. Ask the operator to configure ADMIN_ACCESS_KEY or host authentication.",
+        });
+      if (
+        store.consume &&
+        !(await store.consume(
+          "admin-login:" +
+            crypto
+              .createHash("sha256")
+              .update(req.ip || "unknown")
+              .digest("hex"),
+          5,
+          15 * 60000,
+        ))
+      )
+        return res
+          .status(429)
+          .json({ error: "Too many sign-in attempts. Try again later." });
+      const data = z
+        .object({ key: z.string().min(1).max(512) })
+        .strict()
+        .parse(req.body);
+      if (!equalSecret(data.key, adminKey))
+        return res
+          .status(401)
+          .json({ error: "Invalid administrator access key." });
+      const expires = Date.now() + 8 * 3600000;
+      res.cookie(
+        "terrier_admin",
+        `${expires}.${signAdmin(adminKey, res.locals.owner, institution.id, expires)}`,
+        {
+          httpOnly: true,
+          sameSite: "strict",
+          secure: process.env.NODE_ENV === "production",
+          maxAge: 8 * 3600000,
+          path: "/",
+        },
+      );
+      await audit(res, "admin_login");
+      res.json({ ok: true });
+    },
+  );
+  app.post("/api/admin/logout", (_req, res) => {
+    res.clearCookie("terrier_admin", {
+      path: "/",
+      httpOnly: true,
+      sameSite: "strict",
+      secure: process.env.NODE_ENV === "production",
+    });
+    res.json({ ok: true });
+  });
   app.get("/api/workspace", async (_req, res) =>
     res.json({
-      documents: await store.list(res.locals.owner),
+      documents: await visibleDocuments(res),
       generationEnabled: provider.enabled,
       maxUploadMB: cloud ? 3 : 10,
       requestProcessing: cloud,
+      mode: college ? "college" : "workspace",
+      role: res.locals.admin ? "admin" : "student",
+      adminConfigured: !!options.authenticate || adminKey.length >= 32,
+      hostAuthentication: !!options.authenticate,
+      institution,
     }),
   );
   app.get("/api/documents", async (_req, res) =>
-    res.json({ documents: await store.list(res.locals.owner) }),
+    res.json({ documents: await visibleDocuments(res) }),
   );
   app.post(
     "/api/documents",
+    requireAdmin,
     rateLimit({
       windowMs: 60000,
       limit: 8,
@@ -166,11 +301,10 @@ export function createApp(
           .status(400)
           .json({ error: `Upload a valid PDF up to ${cloud ? 3 : 10} MB.` });
       try {
-        const id = await store.add(res.locals.owner, data.name, bytes);
+        const id = await store.add(res.locals.corpus, data.name, bytes);
+        await audit(res, "document_uploaded", id);
         wake();
-        res
-          .status(202)
-          .json({ id, documents: await store.list(res.locals.owner) });
+        res.status(202).json({ id, documents: await visibleDocuments(res) });
       } catch (e) {
         res
           .status(413)
@@ -185,20 +319,48 @@ export function createApp(
     }
     next();
   });
-  app.delete("/api/documents/:id", async (req, res) => {
-    if (!(await store.remove(res.locals.owner, req.params.id)))
+  app.delete("/api/documents/:id", requireAdmin, async (req, res) => {
+    if (!(await store.remove(res.locals.corpus, String(req.params.id))))
       return res.status(404).json({ error: "Document not found." });
-    res.json({ documents: await store.list(res.locals.owner) });
+    await audit(res, "document_deleted", String(req.params.id));
+    res.json({ documents: await visibleDocuments(res) });
   });
-  app.post("/api/documents/:id/reindex", async (req, res) => {
-    if (!(await store.file(res.locals.owner, req.params.id)))
+  app.post("/api/documents/:id/reindex", requireAdmin, async (req, res) => {
+    if (!(await store.file(res.locals.corpus, String(req.params.id))))
       return res.status(404).json({ error: "Document not found." });
-    await store.mark(req.params.id, "queued");
+    await store.mark(String(req.params.id), "queued");
+    await audit(res, "document_reindexed", String(req.params.id));
     wake();
     res.status(202).json({ ok: true });
   });
+  app.post("/api/documents/:id/publication", requireAdmin, async (req, res) => {
+    const { published } = z
+      .object({ published: z.boolean() })
+      .strict()
+      .parse(req.body);
+    if (
+      !(await store.setPublished(
+        res.locals.corpus,
+        String(req.params.id),
+        published,
+      ))
+    )
+      return res
+        .status(409)
+        .json({ error: "Document is unavailable or not ready to publish." });
+    await audit(
+      res,
+      published ? "document_published" : "document_withdrawn",
+      String(req.params.id),
+    );
+    res.json({ documents: await visibleDocuments(res) });
+  });
   app.get("/api/documents/:id/file", async (req, res) => {
-    const file = await store.file(res.locals.owner, req.params.id);
+    if (
+      !(await visibleDocuments(res)).some((d) => d.id === String(req.params.id))
+    )
+      return res.status(404).json({ error: "Document not found." });
+    const file = await store.file(res.locals.corpus, String(req.params.id));
     if (!file) return res.status(404).json({ error: "Document not found." });
     res
       .type("application/pdf")
@@ -208,22 +370,22 @@ export function createApp(
       );
     res.send(Buffer.from(file.bytes as Uint8Array));
   });
-  app.post("/api/process", async (_req, res) => {
+  app.post("/api/process", requireAdmin, async (_req, res) => {
     if (
       store.consume &&
       !(await store.consume("process:" + res.locals.owner, 20, 60000))
     )
       return res.status(429).json({ error: "Too many processing requests." });
-    const key = "index:" + res.locals.owner;
+    const key = "index:" + res.locals.corpus;
     const lease = store.acquire ? await store.acquire(key, 300000) : null;
     if (store.acquire && !lease)
-      return res.json({ documents: await store.list(res.locals.owner) });
+      return res.json({ documents: await visibleDocuments(res) });
     try {
-      await processOne(store, provider, res.locals.owner);
+      await processOne(store, provider, res.locals.corpus);
     } finally {
       if (lease && store.release) await store.release(key, lease);
     }
-    res.json({ documents: await store.list(res.locals.owner) });
+    res.json({ documents: await visibleDocuments(res) });
   });
   const activeOwners = new Set<string>();
   app.post(
@@ -236,7 +398,8 @@ export function createApp(
     }),
     async (req, res) => {
       const data = querySchema.parse(req.body),
-        owner = res.locals.owner as string;
+        owner = res.locals.actor as string;
+      const knowledgeOwner = res.locals.corpus as string;
       if (activeOwners.has(owner) || activeOwners.size >= 8)
         return res.status(429).json({
           error: "A question is already processing. Please wait and retry.",
@@ -246,7 +409,12 @@ export function createApp(
           error:
             "Answer generation is not configured. The operator must set GEMINI_API_KEY. Documents can still be uploaded and indexed.",
         });
-      const docs = await store.list(owner);
+      const docs = (await visibleDocuments(res)).filter(
+        (d) => !college || d.published,
+      );
+      const documentIds = data.documentIds?.length
+        ? data.documentIds
+        : docs.filter((d) => d.status === "ready").map((d) => d.id);
       if (
         data.documentIds?.some(
           (id) => !docs.some((d) => d.id === id && d.status === "ready"),
@@ -256,19 +424,29 @@ export function createApp(
           error:
             "A selected document is unavailable or still indexing. Refresh the document list.",
         });
-      let chunks = store.search
-        ? []
-        : await store.chunks(owner, data.documentIds);
+      let chunks =
+        store.search || !documentIds.length
+          ? []
+          : await store.chunks(knowledgeOwner, documentIds);
       if (
         store.search ? !docs.some((d) => d.status === "ready") : !chunks.length
       )
         return res.status(409).json({
-          error: "Upload a readable PDF and wait until indexing is complete.",
+          error: college
+            ? "The college knowledge base has no published documents yet. Please check back after an administrator publishes sources."
+            : "Upload a readable PDF and wait until indexing is complete.",
         });
       if (
         store.consume &&
         (!(await store.consume("chat:" + owner, 15, 60000)) ||
-          !(await store.consume("chat:global", 100, 3600000)))
+          !(await store.consume(
+            "chat:global",
+            Math.max(
+              1,
+              Math.min(100000, Number(process.env.CHAT_HOURLY_LIMIT) || 100),
+            ),
+            3600000,
+          )))
       )
         return res
           .status(429)
@@ -331,8 +509,8 @@ export function createApp(
         }
         if (store.search)
           chunks = await store.search(
-            owner,
-            data.documentIds,
+            knowledgeOwner,
+            documentIds,
             query,
             vector,
             provider.embeddingModel,
@@ -379,8 +557,8 @@ export function createApp(
         }
         // Re-check document ownership/existence after slow provider calls.
         const current = new Set(
-          (await store.list(owner))
-            .filter((d) => d.status === "ready")
+          (await visibleDocuments(res))
+            .filter((d) => d.status === "ready" && (!college || d.published))
             .map((d) => d.id),
         );
         if (evidence.some((c) => !current.has(c.documentId)))

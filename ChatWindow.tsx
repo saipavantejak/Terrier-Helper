@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useId } from "react";
 import type { Message } from "./types";
 export default function ChatWindow({
   messages,
@@ -7,7 +7,11 @@ export default function ChatWindow({
   progress,
   onSend,
   onCancel,
+  apiBaseUrl = "/api",
+  college = true,
 }: {
+  apiBaseUrl?: string;
+  college?: boolean;
   messages: Message[];
   busy: boolean;
   ready: boolean;
@@ -15,6 +19,7 @@ export default function ChatWindow({
   onSend: (question: string) => void;
   onCancel: () => void;
 }) {
+  const questionId = useId();
   const [input, setInput] = useState("");
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -31,7 +36,7 @@ export default function ChatWindow({
     <section className="chat-panel" aria-label="Ask your documents">
       <div className="chat-heading">
         <div>
-          <span className="eyebrow">YOUR RESEARCH COMPANION</span>
+          <span className="eyebrow">YOUR CAMPUS COMPANION</span>
           <h2>Ask. Verify. Understand.</h2>
         </div>
         <span className="grounded-badge">● Evidence first</span>
@@ -46,7 +51,7 @@ export default function ChatWindow({
             <div className="chat-emblem">
               T<span>h</span>
             </div>
-            <h3>Your documents, made clear.</h3>
+            <h3>A little guidance. A clearer next step.</h3>
             <p>
               Explore policies, find requirements, and check every answer
               against the original source.
@@ -64,8 +69,9 @@ export default function ChatWindow({
               ))}
             </div>
             <small>
-              Upload a text-based PDF to get started. TerrierHelper is an
-              independent project.
+              {college
+                ? "Answers use sources published by the knowledge-base administrator."
+                : "Upload a text-based PDF to get started."}
             </small>
           </div>
         ) : (
@@ -83,8 +89,8 @@ export default function ChatWindow({
                   {message.answer.status === "insufficient_evidence" ? (
                     <p>
                       I couldn’t find enough supporting evidence to answer that
-                      reliably. Try a more specific question or upload the
-                      relevant document.
+                      reliably. Try a more specific question or contact the
+                      relevant college office.
                     </p>
                   ) : (
                     message.answer.statements.map((statement, index) => (
@@ -123,7 +129,7 @@ export default function ChatWindow({
                           <div className="source-footer">
                             <span>Version {citation.version}</span>
                             <a
-                              href={`/api/documents/${citation.documentId}/file#page=${citation.page}`}
+                              href={`${apiBaseUrl}/documents/${citation.documentId}/file#page=${citation.page}`}
                               target="_blank"
                               rel="noreferrer"
                             >
@@ -154,11 +160,11 @@ export default function ChatWindow({
         <div ref={end} />
       </div>
       <form className="composer" onSubmit={submit}>
-        <label className="sr-only" htmlFor="question">
+        <label className="sr-only" htmlFor={questionId}>
           Ask a question
         </label>
         <textarea
-          id="question"
+          id={questionId}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           maxLength={2000}
@@ -166,8 +172,10 @@ export default function ChatWindow({
           disabled={!ready || busy}
           placeholder={
             ready
-              ? "Ask a question about your documents…"
-              : "Upload and index a document to begin…"
+              ? "Ask about deadlines, policies, or student services…"
+              : college
+                ? "Waiting for published college sources…"
+                : "Upload and index a document to begin…"
           }
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {

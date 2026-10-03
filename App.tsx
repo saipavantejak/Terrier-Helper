@@ -1,125 +1,155 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import ChatWindow from "./ChatWindow";
 import { api, ask, uploadDocument } from "./geminiService";
 import type { KnowledgeDocument, Message } from "./types";
-export default function App() {
-  const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
+
+export interface TerrierHelperProps {
+  /** Same-origin API prefix; use a reverse proxy when the backend is hosted separately. */
+  apiBaseUrl?: string;
+  homeHref?: string;
+  adminHref?: string;
+  view?: "student" | "admin";
+  compact?: boolean;
+  theme?: { primary?: string; accent?: string };
+}
+interface Workspace {
+  documents: KnowledgeDocument[];
+  generationEnabled: boolean;
+  maxUploadMB: number;
+  requestProcessing: boolean;
+  role: "student" | "admin";
+  adminConfigured: boolean;
+  hostAuthentication: boolean;
+  mode: "college" | "workspace";
+  institution: { name: string; location: string; website: string };
+}
+export default function App({
+  apiBaseUrl = "/api",
+  homeHref = "/",
+  adminHref = "/admin",
+  view,
+  compact = false,
+  theme,
+}: TerrierHelperProps) {
+  const adminView =
+    view === "admin" ||
+    (!view &&
+      typeof window !== "undefined" &&
+      /\/admin\/?$/.test(window.location.pathname));
+  const [workspace, setWorkspace] = useState<Workspace>();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [generationEnabled, setGenerationEnabled] = useState(false);
-  const [maxUploadMB, setMaxUploadMB] = useState(10);
-  const [requestProcessing, setRequestProcessing] = useState(false);
-  const processing = useRef(false);
-  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [working, setWorking] = useState(false);
   const [progress, setProgress] = useState("");
+  const [key, setKey] = useState("");
+  const [loggingIn, setLoggingIn] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const sending = useRef(false);
-  const uploadingRef = useRef(false);
-  const readyDocs = documents.filter((d) => d.status === "ready");
-  const indexing = documents.some(
-    (d) => d.status === "queued" || d.status === "processing",
+  const mutation = useRef(false);
+  const processing = useRef(false);
+  const documents = workspace?.documents ?? [];
+  const admin = workspace?.role === "admin" && adminView;
+  const indexing =
+    admin && documents.some((d) => ["queued", "processing"].includes(d.status));
+  const base = apiBaseUrl.replace(/\/$/, "");
+  const reload = useCallback(
+    async (signal?: AbortSignal) => {
+      const data = await api<Workspace>("/api/workspace", { signal }, base);
+      setWorkspace(data);
+    },
+    [base],
   );
   useEffect(() => {
     const controller = new AbortController();
-    api<{
-      documents: KnowledgeDocument[];
-      generationEnabled: boolean;
-      maxUploadMB?: number;
-      requestProcessing?: boolean;
-    }>("/api/workspace", { signal: controller.signal })
-      .then((data) => {
-        setDocuments(data.documents);
-        setGenerationEnabled(data.generationEnabled);
-        setMaxUploadMB(data.maxUploadMB ?? 10);
-        setRequestProcessing(!!data.requestProcessing);
-        setLoaded(true);
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) setError(e.message);
-      });
+    reload(controller.signal).catch((e) => {
+      if (!controller.signal.aborted) setError(e.message);
+    });
     return () => {
       controller.abort();
       abort.current?.abort();
     };
-  }, []);
+  }, [reload]);
   useEffect(() => {
     if (!indexing) return;
     const controller = new AbortController();
-    const timer = setInterval(() => {
-      if (requestProcessing && !processing.current) {
-        processing.current = true;
-        api("/api/process", { method: "POST", body: "{}" })
-          .catch((e) => {
-            if (!controller.signal.aborted) setError(e.message);
-          })
-          .finally(() => {
-            processing.current = false;
-          });
+    const poll = async () => {
+      if (processing.current) return;
+      processing.current = true;
+      try {
+        if (workspace?.requestProcessing)
+          await api(
+            "/api/process",
+            { method: "POST", body: "{}", signal: controller.signal },
+            base,
+          );
+        if (!controller.signal.aborted) await reload(controller.signal);
+      } catch (e) {
+        if (!controller.signal.aborted)
+          setError(e instanceof Error ? e.message : "Indexing failed.");
+      } finally {
+        processing.current = false;
       }
-      api<{ documents: KnowledgeDocument[] }>("/api/documents", {
-        signal: controller.signal,
-      })
-        .then((data) => setDocuments(data.documents))
-        .catch((e) => {
-          if (!controller.signal.aborted) setError(e.message);
-        });
-    }, 2000);
+    };
+    void poll();
+    const timer = setInterval(poll, 3000);
     return () => {
       clearInterval(timer);
       controller.abort();
     };
-  }, [indexing, requestProcessing]);
+  }, [indexing, workspace?.requestProcessing, base, reload]);
+  async function login(event: React.FormEvent) {
+    event.preventDefault();
+    setLoggingIn(true);
+    setError("");
+    try {
+      await api(
+        "/api/admin/login",
+        { method: "POST", body: JSON.stringify({ key }) },
+        base,
+      );
+      setKey("");
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sign-in failed.");
+    } finally {
+      setLoggingIn(false);
+    }
+  }
+  async function mutate(action: () => Promise<unknown>) {
+    if (mutation.current) return;
+    mutation.current = true;
+    setWorking(true);
+    setError("");
+    try {
+      await action();
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save changes.");
+    } finally {
+      mutation.current = false;
+      setWorking(false);
+    }
+  }
   async function upload(event: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (uploadingRef.current) return;
-    uploadingRef.current = true;
-    setUploading(true);
-    setError("");
-    try {
-      for (const file of files) {
-        const result = await uploadDocument(file, maxUploadMB);
-        setDocuments(result.documents);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload failed.");
-    } finally {
-      uploadingRef.current = false;
-      setUploading(false);
-    }
-  }
-  async function remove(id: string) {
-    setError("");
-    try {
-      const result = await api<{ documents: KnowledgeDocument[] }>(
-        `/api/documents/${id}`,
-        { method: "DELETE" },
-      );
-      setDocuments(result.documents);
-      setSelected((s) => s.filter((i) => i !== id));
-      setMessages([]);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed.");
-    }
-  }
-  async function reindex(id: string) {
-    try {
-      await api(`/api/documents/${id}/reindex`, { method: "POST", body: "{}" });
-      setDocuments((d) =>
-        d.map((x) => (x.id === id ? { ...x, status: "queued" } : x)),
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Retry failed.");
-    }
+    await mutate(async () => {
+      for (const file of files)
+        await uploadDocument(file, workspace?.maxUploadMB ?? 3, base);
+    });
   }
   async function send(question: string) {
     if (sending.current) return;
     sending.current = true;
     setBusy(true);
-    setProgress("Finding relevant passages…");
+    setProgress("Finding relevant college sources…");
     const previous = messages.filter((m) => m.role === "user").at(-1)?.content;
     setMessages((m) => [
       ...m,
@@ -130,10 +160,11 @@ export default function App() {
     try {
       const answer = await ask(
         question,
-        selected,
+        [],
         previous,
         setProgress,
         controller.signal,
+        base,
       );
       setMessages((m) => [
         ...m,
@@ -159,196 +190,394 @@ export default function App() {
       abort.current = null;
     }
   }
+  const school = workspace?.institution;
+  const published = documents.filter(
+    (d) =>
+      d.status === "ready" && (workspace?.mode === "workspace" || d.published),
+  );
+  const website = school?.website?.startsWith("https://")
+    ? school.website
+    : "https://www.sfc.edu";
+  const colors: CSSProperties = {
+    "--th-primary": /^#[0-9a-f]{6}$/i.test(theme?.primary || "")
+      ? theme!.primary
+      : "#002b5c",
+    "--th-accent": /^#[0-9a-f]{6}$/i.test(theme?.accent || "")
+      ? theme!.accent
+      : "#c8102e",
+  } as CSSProperties;
   return (
-    <div className="app-shell">
+    <div className={`terrier-app${compact ? " compact" : ""}`} style={colors}>
       <header className="topbar">
-        <a className="brand" href="/" aria-label="TerrierHelper home">
-          <span className="brand-mark">
-            T<span>h</span>
+        <a className="brand" href={homeHref} aria-label="TerrierHelper home">
+          <span className="brand-mark" aria-hidden="true">
+            TH
           </span>
           <span>
-            Terrier<span className="brand-light">Helper</span>
+            TerrierHelper<small>{school?.name || "St. Francis College"}</small>
           </span>
         </a>
-        <span className="header-label">THE DOCUMENT WORKSPACE</span>
-        <a
-          href="https://www.sfc.edu"
-          target="_blank"
-          rel="noreferrer"
-          className="college-link"
-        >
-          St. Francis College ↗
-        </a>
+        <nav aria-label="Primary">
+          <a href={website} target="_blank" rel="noreferrer">
+            College website ↗
+          </a>
+          {adminView ? (
+            <a href={homeHref}>Student view</a>
+          ) : (
+            <a href={adminHref}>Administrator</a>
+          )}
+        </nav>
       </header>
       <main>
-        <div className="intro">
+        <section className="intro">
           <div>
-            <span className="eyebrow">LESS SEARCHING. MORE UNDERSTANDING.</span>
-            <h1>Find clarity in your documents.</h1>
+            <span className="eyebrow">
+              {school?.location || "Brooklyn, New York"} ·{" "}
+              {adminView ? "KNOWLEDGE ADMINISTRATION" : "STUDENT KNOWLEDGE HUB"}
+            </span>
+            <h1>
+              {adminView
+                ? "Good answers start with trusted sources."
+                : "Your college. Your questions. A clearer path."}
+            </h1>
             <p>
-              A focused space to explore college policies—with the evidence
-              always close by.
+              {adminView
+                ? "Review, publish, and maintain the documents students rely on."
+                : "Find guidance in college documents, with a source you can check for every answer."}
             </p>
           </div>
-          <span className="workspace-badge">● Private browser workspace</span>
-        </div>
-        {error ? (
+          <div className="intro-stamp" aria-hidden="true">
+            <span>TH</span>
+            <small>
+              ASK WITH
+              <br />
+              CONFIDENCE
+            </small>
+          </div>
+        </section>
+        {error && (
           <div className="notice error" role="alert">
             {error}
             <button onClick={() => setError("")} aria-label="Dismiss error">
               ×
             </button>
           </div>
-        ) : null}
-        {loaded && !generationEnabled ? (
-          <div className="notice" role="status">
-            Document indexing is available. Answer generation needs a Gemini API
-            key configured by the operator.
+        )}
+        {!workspace && !error && (
+          <div role="status" className="notice">
+            Opening the knowledge hub…
           </div>
-        ) : null}
-        <div className="workspace-grid">
-          <aside className="library-panel" aria-label="Document library">
-            <div className="library-heading">
+        )}
+        {workspace && !workspace.generationEnabled && (
+          <div role="status" className="notice">
+            Answer generation is not configured yet. Published sources are still
+            available to read.
+          </div>
+        )}
+        {adminView && workspace && !admin ? (
+          <section className="login-panel" aria-labelledby="admin-title">
+            <span className="eyebrow">AUTHORIZED STAFF ONLY</span>
+            <h2 id="admin-title">Administrator sign-in</h2>
+            <p>
+              Manage the shared knowledge base. Students never need an
+              administrator key.
+            </p>
+            {!workspace.adminConfigured ? (
+              <div className="notice">
+                Administrator access has not been configured. The deployment
+                owner must set a server-only ADMIN_ACCESS_KEY of at least 32
+                characters, then redeploy.
+              </div>
+            ) : workspace.hostAuthentication ? (
+              <p>
+                Sign in through your organization’s connected application to
+                continue.
+              </p>
+            ) : (
+              <form onSubmit={login}>
+                <label htmlFor="admin-key">Administrator access key</label>
+                <input
+                  id="admin-key"
+                  type="password"
+                  autoComplete="current-password"
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                  required
+                  maxLength={512}
+                />
+                <button className="primary-button" disabled={loggingIn || !key}>
+                  {loggingIn ? "Signing in…" : "Sign in securely"}
+                </button>
+              </form>
+            )}
+            <a href={homeHref}>Back to student questions →</a>
+          </section>
+        ) : admin ? (
+          <section
+            className="admin-panel"
+            aria-label="Knowledge administration"
+          >
+            <div className="panel-title">
               <div>
-                <span className="eyebrow">YOUR KNOWLEDGE BASE</span>
+                <span className="eyebrow">COLLEGE DOCUMENT LIBRARY</span>
                 <h2>
-                  Documents <span>{documents.length}</span>
+                  Manage sources{" "}
+                  <span className="count">{documents.length}</span>
                 </h2>
               </div>
+              {workspace.hostAuthentication ? (
+                <span>Signed in through your organization</span>
+              ) : (
+                <button
+                  className="secondary-button"
+                  disabled={working}
+                  onClick={() =>
+                    mutate(() =>
+                      api(
+                        "/api/admin/logout",
+                        { method: "POST", body: "{}" },
+                        base,
+                      ),
+                    )
+                  }
+                >
+                  Sign out
+                </button>
+              )}
             </div>
-            <label className={`upload-box ${uploading ? "disabled" : ""}`}>
-              <span className="upload-symbol" aria-hidden="true">
-                ↥
+            <div className="admin-summary">
+              <span>
+                <strong>{published.length}</strong> published
               </span>
-              <strong>{uploading ? "Uploading…" : "Add your documents"}</strong>
-              <span>PDF · up to {maxUploadMB} MB each · 300 pages</span>
+              <span>
+                <strong>{documents.filter((d) => !d.published).length}</strong>{" "}
+                drafts & indexing
+              </span>
+              <p>
+                Upload → check the PDF → publish. Only published, ready sources
+                are visible to students.
+              </p>
+            </div>
+            <label className="upload-box">
+              <span className="upload-symbol" aria-hidden="true">
+                ↑
+              </span>
+              <strong>
+                {working ? "Saving…" : "Upload college documents"}
+              </strong>
+              <span>
+                Text-based PDF · up to {workspace?.maxUploadMB} MB each · 300
+                pages
+              </span>
               <input
-                aria-label="Upload PDF documents"
                 type="file"
+                aria-label="Upload PDF documents"
                 accept="application/pdf,.pdf"
                 multiple
+                disabled={working}
                 onChange={upload}
-                disabled={!loaded || uploading || busy}
               />
             </label>
-            <div className="scope-label">
-              <span>
-                {selected.length
-                  ? `${selected.length} selected for questions`
-                  : "Searching all ready documents"}
-              </span>
-              {selected.length ? (
-                <button disabled={busy} onClick={() => setSelected([])}>
-                  Reset
-                </button>
-              ) : null}
-            </div>
-            <div className="document-list">
-              {documents.length === 0 ? (
-                <div className="empty-library">
-                  <span aria-hidden="true">▤</span>
-                  <p>Your library starts here.</p>
-                  <small>
-                    Add a handbook, syllabus, or policy to ask your first
-                    question.
-                  </small>
-                </div>
-              ) : (
-                documents.map((doc) => (
-                  <article key={doc.id} className="document-card">
+            <p className="privacy-note">
+              Publish only documents intended for public student access.
+              Publishing makes the PDF and its indexed content available to all
+              visitors.
+            </p>
+            {documents.length === 0 ? (
+              <div className="empty-library">
+                <h3>No college documents yet</h3>
+                <p>
+                  Start with a current handbook, academic calendar, or
+                  student-services guide.
+                </p>
+              </div>
+            ) : (
+              <div className="admin-documents">
+                {documents.map((doc) => (
+                  <article className="document-card" key={doc.id}>
                     <div className="document-top">
-                      <input
-                        type="checkbox"
-                        aria-label={`Use ${doc.name} for questions`}
-                        checked={selected.includes(doc.id)}
-                        disabled={doc.status !== "ready" || busy}
-                        onChange={(e) =>
-                          setSelected((s) =>
-                            e.target.checked
-                              ? [...s, doc.id]
-                              : s.filter((id) => id !== doc.id),
-                          )
-                        }
-                      />
                       <span className="pdf-icon">PDF</span>
-                      <strong title={doc.name}>{doc.name}</strong>
-                      <button
-                        className="remove-button"
-                        disabled={busy}
-                        onClick={() => remove(doc.id)}
-                        aria-label={`Delete ${doc.name}`}
+                      <h3>{doc.name}</h3>
+                      <span
+                        className={`status-tag ${doc.published ? "published" : ""}`}
                       >
-                        ×
-                      </button>
+                        {doc.published
+                          ? "Published"
+                          : doc.status === "ready"
+                            ? "Draft"
+                            : doc.status}
+                      </span>
                     </div>
-                    <div className={`document-status ${doc.status}`}>
-                      {doc.status === "ready"
-                        ? `${doc.pages} pages · ${doc.chunks} passages · ${doc.semantic ? "hybrid" : "keyword"}`
-                        : doc.status === "failed"
-                          ? "Indexing failed"
-                          : "Indexing…"}
-                    </div>
+                    <p className="document-status">
+                      {doc.pages} pages · {doc.chunks} passages ·{" "}
+                      {doc.semantic ? "hybrid" : "keyword"}
+                    </p>
                     <small className="document-version">
-                      Version {doc.version} ·{" "}
+                      Version {doc.version} · added{" "}
                       {new Date(doc.createdAt).toLocaleDateString()}
                     </small>
-                    {doc.error || doc.warning ? (
+                    {(doc.error || doc.warning) && (
                       <p className="document-warning">
                         {doc.error || doc.warning}
                       </p>
-                    ) : null}
-                    {doc.status === "failed" ||
-                    (doc.status === "ready" &&
-                      !doc.semantic &&
-                      generationEnabled) ? (
-                      <button
-                        className="text-button"
-                        disabled={busy}
-                        onClick={() => reindex(doc.id)}
+                    )}
+                    <div className="document-actions">
+                      <a
+                        href={`${base}/documents/${doc.id}/file`}
+                        target="_blank"
+                        rel="noreferrer"
                       >
-                        Retry indexing
+                        Review PDF ↗
+                      </a>
+                      <button
+                        className="primary-button"
+                        disabled={working || doc.status !== "ready"}
+                        onClick={() =>
+                          mutate(() =>
+                            api(
+                              `/api/documents/${doc.id}/publication`,
+                              {
+                                method: "POST",
+                                body: JSON.stringify({
+                                  published: !doc.published,
+                                }),
+                              },
+                              base,
+                            ),
+                          )
+                        }
+                      >
+                        {doc.published ? "Withdraw" : "Publish"} {doc.name}
                       </button>
-                    ) : null}
+                      {(doc.status === "failed" || doc.status === "ready") && (
+                        <button
+                          className="secondary-button"
+                          disabled={working}
+                          onClick={() =>
+                            mutate(() =>
+                              api(
+                                `/api/documents/${doc.id}/reindex`,
+                                { method: "POST", body: "{}" },
+                                base,
+                              ),
+                            )
+                          }
+                        >
+                          Reindex {doc.name}
+                        </button>
+                      )}
+                      <button
+                        className="danger-button"
+                        disabled={working}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Permanently delete ${doc.name} and its search index?`,
+                            )
+                          )
+                            void mutate(() =>
+                              api(
+                                `/api/documents/${doc.id}`,
+                                { method: "DELETE", body: "{}" },
+                                base,
+                              ),
+                            );
+                        }}
+                      >
+                        Delete {doc.name}
+                      </button>
+                    </div>
                   </article>
-                ))
+                ))}
+              </div>
+            )}
+          </section>
+        ) : (
+          <div className="workspace-grid">
+            <ChatWindow
+              messages={messages}
+              busy={busy}
+              ready={!!workspace?.generationEnabled && published.length > 0}
+              progress={progress}
+              onSend={send}
+              onCancel={() => abort.current?.abort()}
+              apiBaseUrl={base}
+            />
+            <aside
+              className="library-panel"
+              aria-label="Published college sources"
+            >
+              <span className="eyebrow">THE KNOWLEDGE BEHIND THE ANSWERS</span>
+              <h2>
+                Published sources{" "}
+                <span className="count">{published.length}</span>
+              </h2>
+              {published.length === 0 ? (
+                <div className="empty-library">
+                  <h3>The library is getting ready.</h3>
+                  <p>
+                    An administrator needs to publish college documents before
+                    questions can be answered.
+                  </p>
+                  <button
+                    className="secondary-button"
+                    onClick={() => reload().catch((e) => setError(e.message))}
+                  >
+                    Refresh sources
+                  </button>
+                </div>
+              ) : (
+                <ul className="source-list">
+                  {published.map((doc) => (
+                    <li key={doc.id}>
+                      <span className="pdf-icon">PDF</span>
+                      <div>
+                        <a
+                          href={`${base}/documents/${doc.id}/file`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {doc.name} ↗
+                        </a>
+                        <small>
+                          {doc.pages} pages ·{" "}
+                          {new Date(doc.createdAt).toLocaleDateString()}
+                        </small>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               )}
-            </div>
-            <div className="library-footnote">
-              <strong>Your sources stay in your control.</strong>
-              <p>
-                Stored for 30 days in this browser’s workspace. Delete a
-                document to remove its file and search index. Clearing browser
-                cookies loses access.
-              </p>
-              <p>
-                Document text is sent to Google for semantic indexing and
-                answers when AI is configured.
-              </p>
-            </div>
-          </aside>
-          <ChatWindow
-            messages={messages}
-            busy={busy}
-            ready={
-              readyDocs.length > 0 &&
-              generationEnabled &&
-              (!selected.length ||
-                selected.every((id) => readyDocs.some((d) => d.id === id)))
-            }
-            progress={progress}
-            onSend={send}
-            onCancel={() => abort.current?.abort()}
-          />
-        </div>
+              <div className="library-footnote">
+                <h3>Know where your answer comes from.</h3>
+                <p>
+                  Open the citation to check the exact passage and PDF page. If
+                  a source does not support an answer, TerrierHelper will say
+                  so.
+                </p>
+                <p>
+                  Questions and relevant source passages are sent to Google for
+                  answer generation. Avoid including personal or sensitive
+                  information.
+                </p>
+              </div>
+            </aside>
+          </div>
+        )}
         <footer>
-          <span>TerrierHelper · Independent student project</span>
-          <button
-            onClick={() => setMessages([])}
-            disabled={busy || messages.length === 0}
-          >
-            Clear conversation
-          </button>
-          <span>Grounded in your sources.</span>
+          <span>
+            TerrierHelper · Independent project for the{" "}
+            {school?.name || "St. Francis College"} community. Not an official
+            college service.
+          </span>
+          {!adminView && (
+            <button
+              disabled={busy || !messages.length}
+              onClick={() => setMessages([])}
+            >
+              Clear conversation
+            </button>
+          )}
         </footer>
       </main>
     </div>

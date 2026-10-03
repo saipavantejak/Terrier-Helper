@@ -9,6 +9,7 @@ export interface KnowledgeDocument {
   error: string | null;
   warning: string | null;
   semantic: boolean;
+  published?: boolean;
 }
 export interface Citation {
   id: string;

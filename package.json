@@ -15,7 +15,9 @@
     "db:migrate": "node --import tsx scripts/migrate.ts",
     "vercel:build": "npm run db:migrate && npm run build",
     "test:runtime": "tsc api/handler.ts --outDir .runtime-check --noEmit false --module NodeNext --moduleResolution NodeNext --target ES2022 --esModuleInterop --skipLibCheck --strict && node -e \"import('./.runtime-check/api/handler.js')\"",
-    "diagnose:gemini": "node --import tsx scripts/diagnose-gemini.ts"
+    "diagnose:gemini": "node --import tsx scripts/diagnose-gemini.ts",
+    "build:widget": "vite build --config vite.widget.config.ts && tsc widget.tsx --declaration --emitDeclarationOnly --outDir dist-widget --module esnext --moduleResolution bundler --jsx react-jsx --target es2022 --skipLibCheck --esModuleInterop && node scripts/package-widget.mjs",
+    "worker": "node --import tsx scripts/worker.ts"
   },
   "dependencies": {
     "@google/genai": "^1.38.0",
