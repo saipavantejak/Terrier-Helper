@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
+import express from "express";
 import { Store } from "../backend/store.js";
 import { createApp } from "../backend/app.js";
 import type { Provider } from "../backend/provider.js";
@@ -150,6 +151,85 @@ test("host identity adapter enforces institution and never trusts client role he
       .set("X-Role", "admin")
       .send({})
       .expect(403);
+  } finally {
+    store.close();
+  }
+});
+
+// A real host mount exercises the configurable API prefix and trusted auth boundary.
+test("mounted host integration shares published sources and keeps host identity authoritative", async () => {
+  const store = new Store(":memory:");
+  let identity: {
+    subject: string;
+    role: "admin" | "student";
+    institutionId: string;
+  } | null = {
+    subject: "verified-staff",
+    role: "admin",
+    institutionId: "sfc-brooklyn",
+  };
+  try {
+    const host = express();
+    host.use(
+      "/terrier",
+      createApp(store, provider, undefined, {
+        adminKey,
+        authenticate: async () => identity,
+      }),
+    );
+    const agent = request.agent(host);
+    const workspace = await agent.get("/terrier/api/workspace").expect(200);
+    assert.equal(workspace.body.role, "admin");
+    assert.equal(workspace.body.hostAuthentication, true);
+    await agent
+      .post("/terrier/api/admin/login")
+      .send({ key: adminKey })
+      .expect(503);
+    const uploaded = await agent
+      .post("/terrier/api/documents")
+      .send({
+        name: "host.pdf",
+        base64: Buffer.from("%PDF-host").toString("base64"),
+      })
+      .expect(202);
+    const id = uploaded.body.id;
+    store.saveChunks(
+      id,
+      1,
+      [{ page: 1, text: "Library books may be borrowed for fourteen days." }],
+      null,
+      null,
+      null,
+    );
+    await agent
+      .post(`/terrier/api/documents/${id}/publication`)
+      .send({ published: true })
+      .expect(200);
+    identity = null;
+    await agent.delete(`/terrier/api/documents/${id}`).send({}).expect(403);
+    assert.equal(
+      (await agent.get("/terrier/api/workspace")).body.role,
+      "student",
+    );
+    await agent
+      .post("/terrier/api/chat")
+      .send({ question: "How long can library books be borrowed?" })
+      .expect(200);
+    identity = {
+      subject: "verified-staff",
+      role: "admin",
+      institutionId: "sfc-brooklyn",
+    };
+    await agent
+      .post(`/terrier/api/documents/${id}/reindex`)
+      .send({})
+      .expect(202);
+    identity = null;
+    await agent.get(`/terrier/api/documents/${id}/file`).expect(404);
+    await agent
+      .post("/terrier/api/chat")
+      .send({ question: "library books" })
+      .expect(409);
   } finally {
     store.close();
   }
