@@ -108,3 +108,64 @@ test("social response renders without pretending to have retrieved document evid
   assert.ok(!markup.includes("Keyword retrieval"));
   assert.ok(!markup.includes("Open PDF page"));
 });
+
+test("verification receives follow-up context and withholds irrelevant supported text", async () => {
+  const store = new Store(":memory:");
+  let verified = false;
+  const provider: Provider = {
+    enabled: true,
+    embeddingModel: "fixture",
+    embed: async () => [],
+    answer: async (_q, evidence) => ({
+      output: {
+        status: "answered",
+        claims: [
+          {
+            text: evidence[0].text,
+            evidence: [{ sourceId: evidence[0].id, quote: evidence[0].text }],
+          },
+        ],
+      },
+      tokens: 0,
+    }),
+    verify: async (_claims, _evidence, _signal, question) => {
+      assert.match(question!, /class attendance/);
+      assert.match(question!, /Current question: Explain that more simply/);
+      verified = true;
+      return { supported: [false], tokens: 0 };
+    },
+  };
+  try {
+    const agent = request.agent(
+      createApp(store, provider, undefined, { mode: "workspace" }),
+    );
+    const ws = await agent.get("/api/workspace");
+    const owner = ws.headers["set-cookie"][0].split(";")[0].split("=")[1];
+    const id = store.add(owner, "policy.pdf", Buffer.from("%PDF-test"));
+    store.saveChunks(
+      id,
+      1,
+      [
+        {
+          page: 1,
+          text: "Committee attendance is recorded for every meeting.",
+        },
+      ],
+      null,
+      null,
+      null,
+    );
+    const response = await agent
+      .post("/api/chat")
+      .send({
+        question: "Explain that more simply",
+        previousQuestion: "What is the class attendance policy?",
+      })
+      .expect(200);
+    assert.ok(verified);
+    assert.match(response.text, /insufficient_evidence/);
+    assert.ok(!response.text.includes("Committee attendance is recorded"));
+  } finally {
+    store.close();
+  }
+});

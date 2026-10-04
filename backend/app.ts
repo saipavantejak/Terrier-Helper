@@ -561,6 +561,7 @@ export function createApp(
               generated.output.claims,
               evidence,
               controller.signal,
+              query,
             );
             usage += verification.tokens;
             // Fail closed if any claim is unsupported; don't present a misleading partial answer.
