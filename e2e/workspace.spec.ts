@@ -169,3 +169,24 @@ test("student answer renders a citation linked to the actual published PDF (cont
     .getByRole("button", { name: "Delete " + name, exact: true })
     .click();
 });
+
+test("greetings are conversational even when answer generation is disabled", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const question = page.getByLabel("Ask a question");
+  await expect(question).toBeEnabled();
+  await question.fill("Hi");
+  await page.getByRole("button", { name: "Send question" }).click();
+  await expect(
+    page.getByText("Hey! What would you like to figure out?", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Keyword retrieval", { exact: false }),
+  ).toHaveCount(0);
+  await question.fill("Thank you");
+  await page.getByRole("button", { name: "Send question" }).click();
+  await expect(
+    page.getByText("You’re welcome!", { exact: false }),
+  ).toBeVisible();
+});

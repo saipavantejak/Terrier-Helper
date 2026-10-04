@@ -86,11 +86,14 @@ export default function ChatWindow({
               {message.content ? <p>{message.content}</p> : null}
               {message.answer ? (
                 <>
-                  {message.answer.status === "insufficient_evidence" ? (
+                  {message.answer.status === "conversation" ? (
+                    <p>{message.answer.conversation}</p>
+                  ) : message.answer.status === "insufficient_evidence" ? (
                     <p>
                       I couldn’t find enough information in the available
                       documents to answer that confidently, and I don’t want to
-                      guess. Could you make your question a little more specific?
+                      guess. Could you make your question a little more
+                      specific?
                     </p>
                   ) : (
                     message.answer.statements.map((statement, index) => (
@@ -140,12 +143,14 @@ export default function ChatWindow({
                       ))}
                     </div>
                   ) : null}
-                  <small className="answer-meta">
-                    {message.answer.retrievalMode === "hybrid"
-                      ? "Keyword + semantic retrieval"
-                      : "Keyword retrieval"}{" "}
-                    · Check sources before acting on important policies.
-                  </small>
+                  {message.answer.status !== "conversation" ? (
+                    <small className="answer-meta">
+                      {message.answer.retrievalMode === "hybrid"
+                        ? "Keyword + semantic retrieval"
+                        : "Keyword retrieval"}{" "}
+                      · Check sources before acting on important policies.
+                    </small>
+                  ) : null}
                 </>
               ) : null}
             </article>

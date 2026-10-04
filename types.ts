@@ -20,7 +20,8 @@ export interface Citation {
   quote: string;
 }
 export interface Answer {
-  status: "answered" | "insufficient_evidence";
+  status: "answered" | "insufficient_evidence" | "conversation";
+  conversation?: string;
   statements: Array<{ text: string; citationIds: string[] }>;
   citations: Citation[];
   retrievalMode: "hybrid" | "keyword";

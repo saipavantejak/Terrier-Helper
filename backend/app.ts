@@ -1,4 +1,5 @@
 import express from "express";
+import { conversationalReply, retrievalQuestion } from "./conversation.js";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
 import crypto from "node:crypto";
@@ -38,7 +39,7 @@ const uploadSchema = z
   .strict();
 const querySchema = z
   .object({
-    question: z.string().trim().min(3).max(2000),
+    question: z.string().trim().min(1).max(2000),
     documentIds: z.array(z.string().uuid()).max(30).optional(),
     previousQuestion: z.string().max(2000).optional(),
   })
@@ -400,6 +401,22 @@ export function createApp(
       const data = querySchema.parse(req.body),
         owner = res.locals.actor as string;
       const knowledgeOwner = res.locals.corpus as string;
+      const conversation = conversationalReply(data.question);
+      if (conversation) {
+        const answer: Answer = {
+          status: "conversation",
+          conversation,
+          statements: [],
+          citations: [],
+          retrievalMode: "keyword",
+          requestId: res.locals.requestId,
+        };
+        res.setHeader("Content-Type", "text/event-stream");
+        return res.end(
+          `event: answer\ndata: ${JSON.stringify(answer)}\n\nevent: done\ndata: {}\n\n`,
+        );
+      }
+
       if (activeOwners.has(owner) || activeOwners.size >= 8)
         return res.status(429).json({
           error: "A question is already processing. Please wait and retry.",
@@ -481,11 +498,7 @@ export function createApp(
       try {
         send("progress", { message: "Finding relevant passages…" });
         // Only previous user question aids retrieval; past AI answers are never evidence.
-        const query =
-          data.previousQuestion &&
-          /\b(it|that|those|they|this|also|what about)\b/i.test(data.question)
-            ? `${data.previousQuestion}\n${data.question}`
-            : data.question;
+        const query = retrievalQuestion(data.question, data.previousQuestion);
         let vector: number[] | null = null;
         if (
           store.search

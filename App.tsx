@@ -6,6 +6,7 @@ import {
   type CSSProperties,
 } from "react";
 import ChatWindow from "./ChatWindow";
+import { conversationalReply } from "./backend/conversation";
 import { api, ask, uploadDocument } from "./geminiService";
 import type { KnowledgeDocument, Message } from "./types";
 
@@ -150,7 +151,13 @@ export default function App({
     sending.current = true;
     setBusy(true);
     setProgress("Finding relevant college sources…");
-    const previous = messages.filter((m) => m.role === "user").at(-1)?.content;
+    const previous =
+      messages
+        .filter((m) => m.role === "user" && !conversationalReply(m.content))
+        .slice(-3)
+        .map((m) => m.content)
+        .join("\n")
+        .slice(-2000) || undefined;
     setMessages((m) => [
       ...m,
       { id: crypto.randomUUID(), role: "user", content: question },
@@ -497,7 +504,7 @@ export default function App({
             <ChatWindow
               messages={messages}
               busy={busy}
-              ready={!!workspace?.generationEnabled && published.length > 0}
+              ready={!!workspace}
               progress={progress}
               onSend={send}
               onCancel={() => abort.current?.abort()}

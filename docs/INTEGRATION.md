@@ -99,7 +99,9 @@ All calls are same-origin. First call `GET /api/workspace` to establish the anon
 | `POST /api/documents/:id/reindex`     | Admin                    | Withdraws and queues reindexing; review and republish afterwards                          |
 | `DELETE /api/documents/:id`           | Admin                    | Permanently removes the college document and its index                                    |
 
-Chat returns server-sent events `progress`, `answer`, `done`, or `error`. Treat an error event or a connection ending without `done` as a failed response. A successful answer contains individual statements, citation IDs, exact source quotes, page numbers, document versions, retrieval mode, and request ID. Unsupported questions return `insufficient_evidence`.
+Chat returns server-sent events `progress`, `answer`, `done`, or `error`. Treat an error event or a connection ending without `done` as a failed response. A `conversation` response contains a fixed, non-factual `conversation` message for greetings, acknowledgments, or usage help, with empty statements and citations; it makes no college policy claims and does not invoke the model. Document questions still require retrieval and verification. `previousQuestion` can contain up to 2,000 characters of earlier user questions for follow-up context, never past assistant answers as evidence.
+
+A successful document answer contains individual statements, citation IDs, exact source quotes, page numbers, document versions, retrieval mode, and request ID. Unsupported questions return `insufficient_evidence`.
 
 ## Deployment and scaling
 
