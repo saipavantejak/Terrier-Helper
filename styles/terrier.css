@@ -837,3 +837,76 @@
     scroll-behavior: auto;
   }
 }
+
+.terrier-app .feedback-box {
+  margin-top: 1rem;
+  border-top: 1px solid #dbe1e7;
+  padding-top: 0.75rem;
+}
+.terrier-app .feedback-box form,
+.terrier-app .review-form {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+.terrier-app .feedback-box textarea,
+.terrier-app .review-form textarea,
+.terrier-app .feedback-box select,
+.terrier-app .review-form select,
+.terrier-app .review-form input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #a9b5c1;
+  border-radius: 8px;
+  padding: 0.7rem;
+  font: inherit;
+  color: #20303e;
+  background: white;
+}
+.terrier-app .feedback-box textarea,
+.terrier-app .review-form textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+.terrier-app .consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+.terrier-app .consent input {
+  flex: 0 0 auto;
+  margin-top: 0.3rem;
+}
+.terrier-app .feedback-note {
+  font-size: 0.8rem;
+  color: #526373;
+  line-height: 1.5;
+}
+.terrier-app .feedback-admin {
+  margin-top: 2rem;
+  border-top: 1px solid #dbe1e7;
+  padding-top: 1rem;
+}
+.terrier-app .feedback-admin .document-card {
+  margin: 1rem 0;
+  overflow-wrap: anywhere;
+}
+.terrier-app .feedback-admin summary {
+  cursor: pointer;
+  margin: 0.7rem 0;
+}
+.terrier-app .style-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1.5rem;
+  font-size: 0.85rem;
+}
+.terrier-app .style-choice select {
+  padding: 0.4rem;
+  border: 1px solid #a9b5c1;
+  border-radius: 6px;
+  background: white;
+  font: inherit;
+}

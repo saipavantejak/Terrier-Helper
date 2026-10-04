@@ -190,3 +190,77 @@ test("greetings are conversational even when answer generation is disabled", asy
     page.getByText("You’re welcome!", { exact: false }),
   ).toBeVisible();
 });
+
+test("voluntary feedback and admin review work end to end with a signed answer fixture", async ({
+  page,
+  browser,
+}) => {
+  const { feedbackReceipt } = await import("../backend/feedback");
+  const { createHash, randomUUID } = await import("node:crypto");
+  await page.goto("/");
+  await expect(page.getByLabel("Ask a question")).toBeEnabled();
+  const owner = (await page.context().cookies()).find(
+    (c) => c.name === "terrier_owner",
+  )!.value;
+  const question = "Feedback workflow fixture " + randomUUID();
+  const result = {
+    requestId: randomUUID(),
+    status: "insufficient_evidence" as const,
+    statements: [],
+    citations: [],
+    retrievalMode: "keyword" as const,
+  };
+  const token = feedbackReceipt(
+    key,
+    "institution:sfc-brooklyn",
+    createHash("sha256").update(owner).digest("hex"),
+    { question, answer: result },
+  );
+  await page.route("**/api/chat", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body:
+        "event: answer\ndata: " +
+        JSON.stringify({ ...result, feedbackToken: token }) +
+        "\n\nevent: done\ndata: {}\n\n",
+    }),
+  );
+  await page.getByLabel("Answer style").selectOption("plain");
+  await page.getByLabel("Ask a question").fill(question);
+  await page.getByRole("button", { name: "Send question" }).click();
+  await page.getByRole("button", { name: "Give feedback" }).click();
+  await expect(
+    page.getByRole("button", { name: "Submit feedback" }),
+  ).toBeDisabled();
+  await page.getByLabel("Was this answer helpful?").selectOption("unhelpful");
+  await page
+    .getByLabel("What could be better?")
+    .fill("Please review the missing source.");
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Submit feedback" }).click();
+  await expect(
+    page.getByText("Thank you. Your feedback is available for admin review."),
+  ).toBeVisible();
+  const context = await browser.newContext({
+    baseURL: "http://localhost:3111",
+  });
+  const reviewer = await context.newPage();
+  await admin(reviewer);
+  const record = reviewer
+    .getByRole("article")
+    .filter({
+      has: reviewer.getByRole("heading", { name: question, exact: true }),
+    });
+  await expect(
+    record.getByText("Please review the missing source.", { exact: false }),
+  ).toBeVisible();
+  await record.getByRole("button", { name: "Dismiss feedback" }).click();
+  await expect(
+    record.getByText("unhelpful · dismissed", { exact: false }),
+  ).toBeVisible();
+  reviewer.once("dialog", (d) => d.accept());
+  await record.getByRole("button", { name: "Delete feedback" }).click();
+  await expect(record).toHaveCount(0);
+  await context.close();
+});

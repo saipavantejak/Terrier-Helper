@@ -116,3 +116,12 @@ For larger workloads, first measure retrieval recall, p95 latency, pool saturati
 ## Upgrade behavior
 
 The migration is additive. Existing private browser uploads are not transferred into the college namespace or published. Administrators must deliberately upload and publish approved college sources. Publishing makes a PDF and its relevant passages accessible to public visitors; use only material approved for that audience. Existing downloaded copies or previously displayed answers cannot be recalled by withdrawing a document.
+
+## Domain profiles and reviewed feedback (v1.2)
+
+See [DOMAIN_AND_FEEDBACK.md](./DOMAIN_AND_FEEDBACK.md) for college/medical/tech/general
+configuration, authenticated host integration, feedback consent and review, storage
+ports, retention, and scaling limits. `/workspace` now also returns `domain` and
+`feedbackEnabled`; chat accepts optional `responseStyle` (`standard`, `brief`,
+`plain`). Document answers may include an optional signed `feedbackToken`; clients
+must not log that token because it contains the answer snapshot.

@@ -176,3 +176,98 @@ test(
     }
   },
 );
+
+test(
+  "PostgreSQL feedback persists across replicas, isolates corpora, and invalidates withdrawn evidence",
+  { skip: !url },
+  async () => {
+    const store = new PostgresStore(url!),
+      replica = new PostgresStore(url!);
+    const corpus = "institution:feedback-" + crypto.randomUUID();
+    try {
+      await store.pool.query(
+        await readFile(
+          new URL("../migrations/001_cloud.sql", import.meta.url),
+          "utf8",
+        ),
+      );
+      await store.ensureInstitution(corpus);
+      const documentId = await store.add(
+        corpus,
+        "feedback-policy.pdf",
+        Buffer.from("%PDF-feedback-fixture"),
+      );
+      const quote =
+        "Technical systems require a documented review before release.";
+      const job = await store.claimJob(corpus);
+      await store.finishJob(documentId, job.lease, {
+        pages: 1,
+        chunks: [{ page: 1, text: quote }],
+        vectors: null,
+        model: null,
+        warning: null,
+      });
+      await store.setPublished(corpus, documentId, true);
+      const version = (await store.list(corpus))[0].version;
+      const rule = {
+        documentId,
+        version,
+        page: 1,
+        quote,
+        searchQuery: "documented review release",
+      };
+      const record: import("../backend/feedback").FeedbackRecord = {
+        id: crypto.randomUUID(),
+        corpus,
+        actor: "fixture",
+        questionKey: "fixture-key",
+        createdAt: new Date().toISOString(),
+        status: "pending",
+        rating: "unhelpful",
+        note: "Needs review",
+        snapshot: {
+          question: "Release requirements?",
+          answer: {
+            requestId: crypto.randomUUID(),
+            status: "insufficient_evidence",
+            statements: [],
+            citations: [],
+            retrievalMode: "keyword",
+          },
+        },
+      };
+      assert.equal(await store.saveFeedback(record), true);
+      assert.equal(await replica.saveFeedback(record), false);
+      assert.equal(
+        (await replica.getFeedback(corpus, record.id))?.note,
+        "Needs review",
+      );
+      assert.equal(
+        await replica.getFeedback("different-corpus", record.id),
+        undefined,
+      );
+      assert.equal(await replica.hasPassage(corpus, rule, true), true);
+      assert.equal(
+        await replica.hasPassage(
+          corpus,
+          { ...rule, quote: "Fabricated review policy." },
+          true,
+        ),
+        false,
+      );
+      await store.reviewFeedback({ ...record, status: "approved", rule });
+      assert.equal(
+        (await replica.learningRules(corpus, "fixture-key")).length,
+        1,
+      );
+      await store.setPublished(corpus, documentId, false);
+      assert.equal(await replica.hasPassage(corpus, rule, true), false);
+      await replica.deleteFeedback(corpus, record.id);
+      assert.equal((await store.listFeedback(corpus)).length, 0);
+    } finally {
+      await store.pool.query("DELETE FROM owners WHERE id=$1", [corpus]);
+      await store.close();
+      await replica.close();
+    }
+  },
+);

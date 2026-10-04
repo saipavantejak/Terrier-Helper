@@ -4,9 +4,9 @@ await writeFile(
   JSON.stringify(
     {
       name: "@terrier-helper/react",
-      version: "1.1.0",
+      version: "1.2.0",
       type: "module",
-      description: "Embeddable college knowledge assistant UI",
+      description: "Embeddable document-grounded assistant UI",
       main: "./terrier-helper.js",
       types: "./widget.d.ts",
       exports: {

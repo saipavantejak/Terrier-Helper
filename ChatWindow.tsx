@@ -1,3 +1,5 @@
+import FeedbackButton from "./FeedbackButton";
+import { domainProfiles, type DomainProfile } from "./domain";
 import { useEffect, useRef, useState, useId } from "react";
 import type { Message } from "./types";
 export default function ChatWindow({
@@ -9,9 +11,15 @@ export default function ChatWindow({
   onCancel,
   apiBaseUrl = "/api",
   college = true,
+  profile = domainProfiles.college,
+  responseStyle = "standard",
+  onStyleChange,
 }: {
   apiBaseUrl?: string;
   college?: boolean;
+  profile?: DomainProfile;
+  responseStyle?: import("./types").ResponseStyle;
+  onStyleChange?: (style: import("./types").ResponseStyle) => void;
   messages: Message[];
   busy: boolean;
   ready: boolean;
@@ -36,7 +44,7 @@ export default function ChatWindow({
     <section className="chat-panel" aria-label="Ask your documents">
       <div className="chat-heading">
         <div>
-          <span className="eyebrow">YOUR CAMPUS COMPANION</span>
+          <span className="eyebrow">{profile.companion}</span>
           <h2>Ask. Verify. Understand.</h2>
         </div>
         <span className="grounded-badge">● Evidence first</span>
@@ -49,7 +57,13 @@ export default function ChatWindow({
         {messages.length === 0 ? (
           <div className="empty-chat">
             <div className="chat-emblem">
-              T<span>h</span>
+              {profile.id === "college" ? (
+                <>
+                  T<span>h</span>
+                </>
+              ) : (
+                "DOC"
+              )}
             </div>
             <h3>A little guidance. A clearer next step.</h3>
             <p>
@@ -57,11 +71,7 @@ export default function ChatWindow({
               against the original source.
             </p>
             <div className="suggestions">
-              {[
-                "What requirements are listed?",
-                "What deadlines should I know about?",
-                "What exceptions does this policy include?",
-              ].map((q) => (
+              {profile.suggestions.map((q) => (
                 <button key={q} disabled={!ready} onClick={() => onSend(q)}>
                   {q}
                   <span aria-hidden="true">↗</span>
@@ -81,7 +91,9 @@ export default function ChatWindow({
               className={`message ${message.role}${message.error ? " error" : ""}`}
             >
               <span className="message-author">
-                {message.role === "user" ? "YOU" : "TERRIERHELPER"}
+                {message.role === "user"
+                  ? "YOU"
+                  : profile.assistantName.toUpperCase()}
               </span>
               {message.content ? <p>{message.content}</p> : null}
               {message.answer ? (
@@ -151,6 +163,12 @@ export default function ChatWindow({
                       · Check sources before acting on important policies.
                     </small>
                   ) : null}
+                  {message.answer.feedbackToken && (
+                    <FeedbackButton
+                      token={message.answer.feedbackToken}
+                      base={apiBaseUrl}
+                    />
+                  )}
                 </>
               ) : null}
             </article>
@@ -164,6 +182,22 @@ export default function ChatWindow({
         ) : null}
         <div ref={end} />
       </div>
+      {onStyleChange && (
+        <label className="style-choice">
+          Answer style{" "}
+          <select
+            aria-label="Answer style"
+            value={responseStyle}
+            onChange={(e) =>
+              onStyleChange(e.target.value as import("./types").ResponseStyle)
+            }
+          >
+            <option value="standard">Standard</option>
+            <option value="brief">Brief</option>
+            <option value="plain">Simple language</option>
+          </select>
+        </label>
+      )}
       <form className="composer" onSubmit={submit}>
         <label className="sr-only" htmlFor={questionId}>
           Ask a question
@@ -177,9 +211,9 @@ export default function ChatWindow({
           disabled={!ready || busy}
           placeholder={
             ready
-              ? "Ask about deadlines, policies, or student services…"
+              ? profile.placeholder
               : college
-                ? "Waiting for published college sources…"
+                ? "Waiting for published sources…"
                 : "Upload and index a document to begin…"
           }
           onKeyDown={(e) => {

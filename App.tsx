@@ -5,6 +5,8 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import FeedbackAdmin from "./FeedbackAdmin";
+import { domainProfiles, type DomainProfile } from "./domain";
 import ChatWindow from "./ChatWindow";
 import { conversationalReply } from "./backend/conversation";
 import { api, ask, uploadDocument } from "./geminiService";
@@ -28,6 +30,8 @@ interface Workspace {
   adminConfigured: boolean;
   hostAuthentication: boolean;
   mode: "college" | "workspace";
+  domain?: DomainProfile;
+  feedbackEnabled?: boolean;
   institution: { name: string; location: string; website: string };
 }
 export default function App({
@@ -44,6 +48,8 @@ export default function App({
       typeof window !== "undefined" &&
       /\/admin\/?$/.test(window.location.pathname));
   const [workspace, setWorkspace] = useState<Workspace>();
+  const [responseStyle, setResponseStyle] =
+    useState<import("./types").ResponseStyle>("standard");
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -150,7 +156,14 @@ export default function App({
     if (sending.current) return;
     sending.current = true;
     setBusy(true);
-    setProgress("Finding relevant college sources…");
+    const style =
+      /\b(simpler|simple language|simple terms|plain english)\b/i.test(question)
+        ? "plain"
+        : /\b(more briefly|be brief|shorter|keep it short)\b/i.test(question)
+          ? "brief"
+          : responseStyle;
+    setResponseStyle(style);
+    setProgress("Finding relevant sources…");
     const previous =
       messages
         .filter((m) => m.role === "user" && !conversationalReply(m.content))
@@ -172,6 +185,7 @@ export default function App({
         setProgress,
         controller.signal,
         base,
+        style,
       );
       setMessages((m) => [
         ...m,
@@ -198,13 +212,18 @@ export default function App({
     }
   }
   const school = workspace?.institution;
+  const profile = workspace?.domain || domainProfiles.college;
+  useEffect(() => {
+    if (!compact && workspace)
+      document.title = `${workspace.domain?.assistantName || "TerrierHelper"} — ${workspace.institution.name}`;
+  }, [compact, workspace?.domain?.assistantName, workspace?.institution.name]);
   const published = documents.filter(
     (d) =>
       d.status === "ready" && (workspace?.mode === "workspace" || d.published),
   );
   const website = school?.website?.startsWith("https://")
     ? school.website
-    : "https://www.sfc.edu";
+    : undefined;
   const colors: CSSProperties = {
     "--th-primary": /^#[0-9a-f]{6}$/i.test(theme?.primary || "")
       ? theme!.primary
@@ -216,20 +235,36 @@ export default function App({
   return (
     <div className={`terrier-app${compact ? " compact" : ""}`} style={colors}>
       <header className="topbar">
-        <a className="brand" href={homeHref} aria-label="TerrierHelper home">
+        <a
+          className="brand"
+          href={homeHref}
+          aria-label={`${profile.assistantName} home`}
+        >
           <span className="brand-mark" aria-hidden="true">
-            TH
+            {profile.id === "college"
+              ? "TH"
+              : profile.assistantName
+                  .split(/\s+/)
+                  .map((w) => w[0])
+                  .join("")
+                  .slice(0, 2)
+                  .toUpperCase()}
           </span>
           <span>
-            TerrierHelper<small>{school?.name || "St. Francis College"}</small>
+            {profile.assistantName}
+            <small>{school?.name || "Knowledge Hub"}</small>
           </span>
         </a>
         <nav aria-label="Primary">
-          <a href={website} target="_blank" rel="noreferrer">
-            College website ↗
-          </a>
+          {website && (
+            <a href={website} target="_blank" rel="noreferrer">
+              {profile.id === "college" ? "College" : "Organization"} website ↗
+            </a>
+          )}
           {adminView ? (
-            <a href={homeHref}>Student view</a>
+            <a href={homeHref}>
+              {profile.id === "college" ? "Student" : "Reader"} view
+            </a>
           ) : (
             <a href={adminHref}>Administrator</a>
           )}
@@ -239,22 +274,22 @@ export default function App({
         <section className="intro">
           <div>
             <span className="eyebrow">
-              {school?.location || "Brooklyn, New York"} ·{" "}
-              {adminView ? "KNOWLEDGE ADMINISTRATION" : "STUDENT KNOWLEDGE HUB"}
+              {school?.location ? `${school.location} · ` : ""}
+              {adminView ? "KNOWLEDGE ADMINISTRATION" : profile.hub}
             </span>
             <h1>
               {adminView
                 ? "Good answers start with trusted sources."
-                : "Your college. Your questions. A clearer path."}
+                : profile.headline}
             </h1>
             <p>
               {adminView
-                ? "Review, publish, and maintain the documents students rely on."
-                : "Find guidance in college documents, with a source you can check for every answer."}
+                ? `Review, publish, and maintain the documents ${profile.audience} rely on.`
+                : profile.description}
             </p>
           </div>
           <div className="intro-stamp" aria-hidden="true">
-            <span>TH</span>
+            <span>{profile.id === "college" ? "TH" : "DOC"}</span>
             <small>
               ASK WITH
               <br />
@@ -262,6 +297,7 @@ export default function App({
             </small>
           </div>
         </section>
+        {profile.id === "medical" && <p className="notice">{profile.notice}</p>}
         {error && (
           <div className="notice error" role="alert">
             {error}
@@ -286,7 +322,7 @@ export default function App({
             <span className="eyebrow">AUTHORIZED STAFF ONLY</span>
             <h2 id="admin-title">Administrator sign-in</h2>
             <p>
-              Manage the shared knowledge base. Students never need an
+              Manage the shared knowledge base. Readers never need an
               administrator key.
             </p>
             {!workspace.adminConfigured ? (
@@ -317,7 +353,7 @@ export default function App({
                 </button>
               </form>
             )}
-            <a href={homeHref}>Back to student questions →</a>
+            <a href={homeHref}>Back to questions →</a>
           </section>
         ) : admin ? (
           <section
@@ -326,7 +362,7 @@ export default function App({
           >
             <div className="panel-title">
               <div>
-                <span className="eyebrow">COLLEGE DOCUMENT LIBRARY</span>
+                <span className="eyebrow">DOCUMENT LIBRARY</span>
                 <h2>
                   Manage sources{" "}
                   <span className="count">{documents.length}</span>
@@ -362,16 +398,14 @@ export default function App({
               </span>
               <p>
                 Upload → check the PDF → publish. Only published, ready sources
-                are visible to students.
+                are visible to readers.
               </p>
             </div>
             <label className="upload-box">
               <span className="upload-symbol" aria-hidden="true">
                 ↑
               </span>
-              <strong>
-                {working ? "Saving…" : "Upload college documents"}
-              </strong>
+              <strong>{working ? "Saving…" : "Upload documents"}</strong>
               <span>
                 Text-based PDF · up to {workspace?.maxUploadMB} MB each · 300
                 pages
@@ -386,16 +420,15 @@ export default function App({
               />
             </label>
             <p className="privacy-note">
-              Publish only documents intended for public student access.
-              Publishing makes the PDF and its indexed content available to all
-              visitors.
+              Publish only documents intended for public access. Publishing
+              makes the PDF and its indexed content available to all visitors.
             </p>
             {documents.length === 0 ? (
               <div className="empty-library">
-                <h3>No college documents yet</h3>
+                <h3>No documents yet</h3>
                 <p>
-                  Start with a current handbook, academic calendar, or
-                  student-services guide.
+                  Start with current, approved reference documents for your
+                  audience.
                 </p>
               </div>
             ) : (
@@ -498,6 +531,7 @@ export default function App({
                 ))}
               </div>
             )}
+            <FeedbackAdmin base={base} documents={documents} />
           </section>
         ) : (
           <div className="workspace-grid">
@@ -509,11 +543,11 @@ export default function App({
               onSend={send}
               onCancel={() => abort.current?.abort()}
               apiBaseUrl={base}
+              profile={profile}
+              responseStyle={responseStyle}
+              onStyleChange={setResponseStyle}
             />
-            <aside
-              className="library-panel"
-              aria-label="Published college sources"
-            >
+            <aside className="library-panel" aria-label="Published sources">
               <span className="eyebrow">THE KNOWLEDGE BEHIND THE ANSWERS</span>
               <h2>
                 Published sources{" "}
@@ -523,8 +557,8 @@ export default function App({
                 <div className="empty-library">
                   <h3>The library is getting ready.</h3>
                   <p>
-                    An administrator needs to publish college documents before
-                    questions can be answered.
+                    An administrator needs to publish documents before questions
+                    can be answered.
                   </p>
                   <button
                     className="secondary-button"
@@ -559,7 +593,7 @@ export default function App({
                 <h3>Know where your answer comes from.</h3>
                 <p>
                   Open the citation to check the exact passage and PDF page. If
-                  a source does not support an answer, TerrierHelper will say
+                  a source does not support an answer, the assistant will say
                   so.
                 </p>
                 <p>
@@ -573,14 +607,15 @@ export default function App({
         )}
         <footer>
           <span>
-            TerrierHelper · Independent project for the{" "}
-            {school?.name || "St. Francis College"} community. Not an official
-            college service.
+            {profile.assistantName} · {profile.notice}
           </span>
           {!adminView && (
             <button
               disabled={busy || !messages.length}
-              onClick={() => setMessages([])}
+              onClick={() => {
+                setMessages([]);
+                setResponseStyle("standard");
+              }}
             >
               Clear conversation
             </button>

@@ -11,6 +11,11 @@ export interface AppOptions {
   mode?: "college" | "workspace";
   institution?: Institution;
   adminKey?: string;
+  domain?: import("../domain.js").DomainProfile;
+  feedbackKey?: string;
+  feedbackEnabled?: boolean;
+  /** Fail closed for every reader when a host-owned sign-in is required. */
+  requireReaderAuthentication?: boolean;
   /** Host-owned authentication: validate the host's session/JWT before returning a role. */
   authenticate?: (req: Request) => Promise<{
     subject: string;

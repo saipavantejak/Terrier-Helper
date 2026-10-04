@@ -1,3 +1,6 @@
+import { domainProfile } from "../domain.js";
+import { feedbackReceipt, learnedQuery } from "./feedback.js";
+import { feedbackRoutes } from "./feedback-routes.js";
 import express from "express";
 import { conversationalReply, retrievalQuestion } from "./conversation.js";
 import helmet from "helmet";
@@ -42,6 +45,7 @@ const querySchema = z
     question: z.string().trim().min(1).max(2000),
     documentIds: z.array(z.string().uuid()).max(30).optional(),
     previousQuestion: z.string().max(2000).optional(),
+    responseStyle: z.enum(["standard", "brief", "plain"]).default("standard"),
   })
   .strict();
 export function createApp(
@@ -52,9 +56,34 @@ export function createApp(
 ) {
   const app = express();
   const college = options.mode !== "workspace";
-  const institution = options.institution || defaultInstitution;
+  const domain =
+    options.domain ||
+    domainProfile(
+      process.env.ASSISTANT_DOMAIN || "college",
+      process.env.ASSISTANT_NAME,
+    );
+  const institution =
+    options.institution ||
+    (domain.id === "college"
+      ? defaultInstitution
+      : {
+          id: process.env.INSTITUTION_ID || domain.id + "-documents",
+          name: process.env.INSTITUTION_NAME || "Document Library",
+          location: process.env.INSTITUTION_LOCATION || "",
+          website: process.env.INSTITUTION_WEBSITE || "",
+        });
+  if (options.requireReaderAuthentication && !options.authenticate)
+    throw new Error(
+      "Reader authentication requires a verified host identity adapter",
+    );
   const corpus = institutionOwner(institution.id);
   const adminKey = options.adminKey ?? process.env.ADMIN_ACCESS_KEY ?? "";
+  const feedbackKey =
+    options.feedbackKey ?? (process.env.FEEDBACK_SIGNING_KEY || adminKey);
+  const feedbackEnabled =
+    (options.feedbackEnabled ??
+      (process.env.FEEDBACK_ENABLED !== "false" && domain.id !== "medical")) &&
+    feedbackKey.length >= 32;
   let initialized: Promise<void> | undefined;
   const ensureCorpus = () =>
     (initialized ??= Promise.resolve(store.ensureInstitution(corpus)).catch(
@@ -184,6 +213,10 @@ export function createApp(
       const identity = await options.authenticate(req);
       if (identity && identity.institutionId !== institution.id)
         return res.status(403).json({ error: "Institution access denied." });
+      if (!identity && options.requireReaderAuthentication)
+        return res.status(401).json({
+          error: "Sign in through your organization to access these documents.",
+        });
       // Supplying an adapter makes it authoritative; bootstrap cookies cannot bypass it.
       res.locals.admin = identity?.role === "admin";
       if (identity)
@@ -270,7 +303,17 @@ export function createApp(
       adminConfigured: !!options.authenticate || adminKey.length >= 32,
       hostAuthentication: !!options.authenticate,
       institution,
+      domain,
+      feedbackEnabled,
     }),
+  );
+  feedbackRoutes(
+    app,
+    store,
+    feedbackKey,
+    feedbackEnabled,
+    college,
+    requireAdmin,
   );
   app.get("/api/documents", async (_req, res) =>
     res.json({ documents: await visibleDocuments(res) }),
@@ -401,7 +444,11 @@ export function createApp(
       const data = querySchema.parse(req.body),
         owner = res.locals.actor as string;
       const knowledgeOwner = res.locals.corpus as string;
-      const conversation = conversationalReply(data.question);
+      const conversation = conversationalReply(
+        data.question,
+        domain.assistantName,
+        domain.id === "college",
+      );
       if (conversation) {
         const answer: Answer = {
           status: "conversation",
@@ -450,7 +497,7 @@ export function createApp(
       )
         return res.status(409).json({
           error: college
-            ? "The college knowledge base has no published documents yet. Please check back after an administrator publishes sources."
+            ? "The knowledge base has no published documents yet. Please check back after an administrator publishes sources."
             : "Upload a readable PDF and wait until indexing is complete.",
         });
       if (
@@ -499,6 +546,9 @@ export function createApp(
         send("progress", { message: "Finding relevant passages…" });
         // Only previous user question aids retrieval; past AI answers are never evidence.
         const query = retrievalQuestion(data.question, data.previousQuestion);
+        const searchQuery = feedbackEnabled
+          ? await learnedQuery(store, knowledgeOwner, query, college)
+          : query;
         let vector: number[] | null = null;
         if (
           store.search
@@ -508,7 +558,7 @@ export function createApp(
           try {
             vector = (
               await provider.embed(
-                [query],
+                [searchQuery],
                 "RETRIEVAL_QUERY",
                 controller.signal,
               )
@@ -524,13 +574,13 @@ export function createApp(
           chunks = await store.search(
             knowledgeOwner,
             documentIds,
-            query,
+            searchQuery,
             vector,
             provider.embeddingModel,
           );
         const evidence = retrieve(
           chunks,
-          query,
+          searchQuery,
           vector,
           provider.embeddingModel,
         );
@@ -550,6 +600,7 @@ export function createApp(
             query,
             evidence,
             controller.signal,
+            data.responseStyle,
           );
           usage += generated.tokens;
           const grounded = validateCitations(generated.output, evidence);
@@ -570,13 +621,22 @@ export function createApp(
           }
         }
         // Re-check document ownership/existence after slow provider calls.
-        const current = new Set(
+        const current = new Map(
           (await visibleDocuments(res))
             .filter((d) => d.status === "ready" && (!college || d.published))
-            .map((d) => d.id),
+            .map((d) => [d.id, d.version]),
         );
-        if (evidence.some((c) => !current.has(c.documentId)))
+        if (evidence.some((c) => current.get(c.documentId) !== c.version))
           throw new Error("Document changed during generation");
+        if (feedbackEnabled) {
+          const token = feedbackReceipt(feedbackKey, knowledgeOwner, owner, {
+            question: data.question,
+            context: data.previousQuestion,
+            answer: result,
+          });
+          if (token.length <= 150000)
+            result = { ...result, feedbackToken: token };
+        }
         send("answer", result);
         await store.record({
           requestId,

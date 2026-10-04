@@ -23,6 +23,13 @@ export type Storage = AsyncCompatible<
     | "record"
     | "close"
     | "health"
+    | "saveFeedback"
+    | "listFeedback"
+    | "getFeedback"
+    | "reviewFeedback"
+    | "deleteFeedback"
+    | "learningRules"
+    | "hasPassage"
   >
 > & {
   claimJob?(

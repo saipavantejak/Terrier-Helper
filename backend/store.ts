@@ -1,3 +1,4 @@
+import type { FeedbackRecord } from "./feedback.js";
 import { documentLimits } from "./limits.js";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
@@ -38,6 +39,12 @@ export class Store {
       CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY, createdAt TEXT NOT NULL, data TEXT NOT NULL);
     `);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS feedback (
+      id TEXT PRIMARY KEY, corpus TEXT NOT NULL REFERENCES owners(id) ON DELETE CASCADE,
+      actor TEXT NOT NULL, question_key TEXT NOT NULL, created_at TEXT NOT NULL,
+      status TEXT NOT NULL, data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS feedback_review ON feedback(corpus,created_at DESC,id DESC);
+      CREATE INDEX IF NOT EXISTS feedback_learning ON feedback(corpus,question_key,status);`);
     const columns = this.db.prepare("PRAGMA table_info(documents)").all();
     if (!columns.some((c) => c.name === "published"))
       this.db.exec(
@@ -46,6 +53,85 @@ export class Store {
     this.db
       .prepare("UPDATE documents SET status='queued' WHERE status='processing'")
       .run();
+  }
+  hasPassage(
+    corpus: string,
+    rule: import("./feedback.js").LearningRule,
+    published: boolean,
+  ) {
+    return !!this.db
+      .prepare(
+        `SELECT 1 FROM documents d JOIN chunks c ON c.documentId=d.id
+      WHERE d.owner=? AND d.id=? AND d.version=? AND d.status='ready' AND (?=0 OR d.published=1)
+      AND c.page=? AND instr(c.text,?)>0 LIMIT 1`,
+      )
+      .get(
+        corpus,
+        rule.documentId,
+        rule.version,
+        published ? 1 : 0,
+        rule.page,
+        rule.quote,
+      );
+  }
+  saveFeedback(record: FeedbackRecord) {
+    return (
+      this.db
+        .prepare(
+          "INSERT INTO feedback VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
+        )
+        .run(
+          record.id,
+          record.corpus,
+          record.actor,
+          record.questionKey,
+          record.createdAt,
+          record.status,
+          JSON.stringify(record),
+        ).changes > 0
+    );
+  }
+  listFeedback(corpus: string, offset = 0): FeedbackRecord[] {
+    this.db
+      .prepare(
+        "DELETE FROM feedback WHERE corpus=? AND status!='approved' AND created_at<?",
+      )
+      .run(corpus, new Date(Date.now() - 30 * 86400000).toISOString());
+    return this.db
+      .prepare(
+        "SELECT data FROM feedback WHERE corpus=? ORDER BY created_at DESC,id DESC LIMIT 51 OFFSET ?",
+      )
+      .all(corpus, offset)
+      .map((r) => JSON.parse(String(r.data)));
+  }
+  getFeedback(corpus: string, id: string): FeedbackRecord | undefined {
+    const row = this.db
+      .prepare("SELECT data FROM feedback WHERE corpus=? AND id=?")
+      .get(corpus, id);
+    return row ? JSON.parse(String(row.data)) : undefined;
+  }
+  reviewFeedback(record: FeedbackRecord) {
+    return (
+      this.db
+        .prepare("UPDATE feedback SET status=?,data=? WHERE corpus=? AND id=?")
+        .run(record.status, JSON.stringify(record), record.corpus, record.id)
+        .changes > 0
+    );
+  }
+  deleteFeedback(corpus: string, id: string) {
+    return (
+      this.db
+        .prepare("DELETE FROM feedback WHERE corpus=? AND id=?")
+        .run(corpus, id).changes > 0
+    );
+  }
+  learningRules(corpus: string, key: string): FeedbackRecord[] {
+    return this.db
+      .prepare(
+        "SELECT data FROM feedback WHERE corpus=? AND question_key=? AND status='approved' ORDER BY created_at DESC LIMIT 5",
+      )
+      .all(corpus, key)
+      .map((r) => JSON.parse(String(r.data)));
   }
   owner(token: string | undefined): boolean {
     return (
@@ -79,6 +165,9 @@ export class Store {
     );
   }
   cleanup() {
+    this.db
+      .prepare("DELETE FROM feedback WHERE status!='approved' AND created_at<?")
+      .run(new Date(Date.now() - 30 * 86400000).toISOString());
     this.db.prepare("DELETE FROM owners WHERE expires<=?").run(Date.now());
     this.db
       .prepare("DELETE FROM events WHERE createdAt<?")

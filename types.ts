@@ -1,3 +1,4 @@
+export type ResponseStyle = "standard" | "brief" | "plain";
 export interface KnowledgeDocument {
   id: string;
   name: string;
@@ -22,6 +23,8 @@ export interface Citation {
 export interface Answer {
   status: "answered" | "insufficient_evidence" | "conversation";
   conversation?: string;
+  /** Signed, session-bound receipt; only persisted when the user submits feedback. */
+  feedbackToken?: string;
   statements: Array<{ text: string; citationIds: string[] }>;
   citations: Citation[];
   retrievalMode: "hybrid" | "keyword";

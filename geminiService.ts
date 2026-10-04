@@ -45,11 +45,17 @@ export async function ask(
   onProgress: (text: string) => void,
   signal: AbortSignal,
   base = "/api",
+  responseStyle: import("./types").ResponseStyle = "standard",
 ): Promise<Answer> {
   const response = await fetch(base.replace(/\/$/, "") + "/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, documentIds, previousQuestion }),
+    body: JSON.stringify({
+      question,
+      documentIds,
+      previousQuestion,
+      responseStyle,
+    }),
     signal,
   });
   if (!response.ok) {

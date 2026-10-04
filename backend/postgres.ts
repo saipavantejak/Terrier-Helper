@@ -1,3 +1,4 @@
+import type { FeedbackRecord } from "./feedback.js";
 import { documentLimits } from "./limits.js";
 import pg from "pg";
 import crypto from "node:crypto";
@@ -19,6 +20,98 @@ export class PostgresStore implements Storage {
     this.pool.on("error", () =>
       console.error("Database pool connection failed"),
     );
+  }
+  async hasPassage(
+    corpus: string,
+    rule: import("./feedback.js").LearningRule,
+    published: boolean,
+  ) {
+    return (
+      (
+        await this.pool.query(
+          `SELECT 1 FROM documents d JOIN chunks c ON c."documentId"=d.id
+      WHERE d.owner=$1 AND d.id=$2 AND d.version=$3 AND d.status='ready' AND (NOT $4::boolean OR d.published)
+      AND c.page=$5 AND strpos(c.text,$6)>0 LIMIT 1`,
+          [
+            corpus,
+            rule.documentId,
+            rule.version,
+            published,
+            rule.page,
+            rule.quote,
+          ],
+        )
+      ).rowCount! > 0
+    );
+  }
+  async saveFeedback(record: FeedbackRecord) {
+    return (
+      (
+        await this.pool.query(
+          "INSERT INTO feedback VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING",
+          [
+            record.id,
+            record.corpus,
+            record.actor,
+            record.questionKey,
+            record.createdAt,
+            record.status,
+            JSON.stringify(record),
+          ],
+        )
+      ).rowCount! > 0
+    );
+  }
+  async listFeedback(corpus: string, offset = 0): Promise<FeedbackRecord[]> {
+    await this.pool.query(
+      "DELETE FROM feedback WHERE corpus=$1 AND status!='approved' AND created_at<$2",
+      [corpus, new Date(Date.now() - 30 * 86400000).toISOString()],
+    );
+    return (
+      await this.pool.query(
+        "SELECT data FROM feedback WHERE corpus=$1 ORDER BY created_at DESC,id DESC LIMIT 51 OFFSET $2",
+        [corpus, offset],
+      )
+    ).rows.map((r) => r.data);
+  }
+  async getFeedback(
+    corpus: string,
+    id: string,
+  ): Promise<FeedbackRecord | undefined> {
+    return (
+      await this.pool.query(
+        "SELECT data FROM feedback WHERE corpus=$1 AND id=$2",
+        [corpus, id],
+      )
+    ).rows[0]?.data;
+  }
+  async reviewFeedback(record: FeedbackRecord) {
+    return (
+      (
+        await this.pool.query(
+          "UPDATE feedback SET status=$1,data=$2 WHERE corpus=$3 AND id=$4",
+          [record.status, JSON.stringify(record), record.corpus, record.id],
+        )
+      ).rowCount! > 0
+    );
+  }
+  async deleteFeedback(corpus: string, id: string) {
+    return (
+      (
+        await this.pool.query(
+          "DELETE FROM feedback WHERE corpus=$1 AND id=$2",
+          [corpus, id],
+        )
+      ).rowCount! > 0
+    );
+  }
+  async learningRules(corpus: string, key: string): Promise<FeedbackRecord[]> {
+    return (
+      await this.pool.query(
+        "SELECT data FROM feedback WHERE corpus=$1 AND question_key=$2 AND status='approved' ORDER BY created_at DESC LIMIT 5",
+        [corpus, key],
+      )
+    ).rows.map((r) => r.data);
   }
   async health() {
     await this.pool.query("SELECT 1 FROM owners LIMIT 1");
@@ -59,6 +152,10 @@ export class PostgresStore implements Storage {
     );
   }
   async cleanup() {
+    await this.pool.query(
+      "DELETE FROM feedback WHERE status!='approved' AND created_at<$1",
+      [new Date(Date.now() - 30 * 86400000).toISOString()],
+    );
     await this.pool.query("DELETE FROM owners WHERE expires<=$1", [Date.now()]);
     await this.pool.query('DELETE FROM events WHERE "createdAt"<$1', [
       new Date(Date.now() - 30 * 86400000).toISOString(),

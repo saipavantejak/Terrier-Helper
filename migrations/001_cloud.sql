@@ -24,3 +24,12 @@ CREATE TABLE IF NOT EXISTS leases (key text PRIMARY KEY, token uuid NOT NULL, ex
 -- Additive migration: existing private documents remain unpublished.
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS published boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS documents_published_owner ON documents(owner) WHERE published AND status='ready';
+
+-- Voluntary feedback and version-bound retrieval hints, isolated by corpus.
+CREATE TABLE IF NOT EXISTS feedback (
+ id uuid PRIMARY KEY, corpus text NOT NULL REFERENCES owners(id) ON DELETE CASCADE,
+ actor text NOT NULL, question_key text NOT NULL, created_at text NOT NULL,
+ status text NOT NULL CHECK(status IN ('pending','approved','dismissed')), data jsonb NOT NULL
+);
+CREATE INDEX IF NOT EXISTS feedback_review ON feedback(corpus,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS feedback_learning ON feedback(corpus,question_key,status);
