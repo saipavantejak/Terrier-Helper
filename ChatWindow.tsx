@@ -88,9 +88,9 @@ export default function ChatWindow({
                 <>
                   {message.answer.status === "insufficient_evidence" ? (
                     <p>
-                      I couldn’t find enough supporting evidence to answer that
-                      reliably. Try a more specific question or contact the
-                      relevant college office.
+                      I couldn’t find enough information in the available
+                      documents to answer that confidently, and I don’t want to
+                      guess. Could you make your question a little more specific?
                     </p>
                   ) : (
                     message.answer.statements.map((statement, index) => (
